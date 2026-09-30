@@ -60,5 +60,13 @@
     }
   },
   "description": "Workout app for the Pebble Time 2 with live heart-rate zones",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WayeMelse/allure.git"
+  },
+  "homepage": "https://github.com/WayeMelse/allure#readme",
+  "bugs": {
+    "url": "https://github.com/WayeMelse/allure/issues"
+  }
 }

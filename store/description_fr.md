@@ -19,3 +19,7 @@ lisible. Choisis ton activité et garde un oeil sur ta zone d'effort grace a la 
 Nécessite une Pebble Time 2 avec capteur cardiaque activé.
 
 Auteur : WayeM
+
+Code source : https://github.com/WayeMelse/allure
+
+Code source : https://github.com/WayeMelse/allure
