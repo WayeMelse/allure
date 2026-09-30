@@ -1,0 +1,64 @@
+{
+  "name": "allure",
+  "author": "WayeM",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "@rebble/clay": "^1.1.0"
+  },
+  "pebble": {
+    "displayName": "Allure",
+    "uuid": "74fd9950-e0f4-48b8-8a4f-aff3e1210aad",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "capabilities": [
+      "health",
+      "configurable"
+    ],
+    "targetPlatforms": [
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "Sex",
+      "Age",
+      "Height",
+      "Weight"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "font",
+          "name": "FONT_ROBOTO_CONDENSED_EXTRABOLD_56",
+          "file": "fonts/robotocondensed-extrabold.ttf",
+          "characterRegex": "[0-9: ]"
+        },
+        {
+          "type": "font",
+          "name": "FONT_ROBOTO_CONDENSED_EXTRABOLD_100",
+          "file": "fonts/robotocondensed-extrabold.ttf",
+          "characterRegex": "[0-9]"
+        },
+        {
+          "type": "font",
+          "name": "FONT_NOTO_EMOJI_40",
+          "file": "fonts/notoemoji.ttf",
+          "characterRegex": "[\\U0001F6B6\\U0001F3C3\\u2665]"
+        },
+        {
+          "type": "font",
+          "name": "FONT_ROBOTO_CONDENSED_EXTRABOLD_34",
+          "file": "fonts/robotocondensed-extrabold.ttf",
+          "characterRegex": "[0-9A-Za-z\\u00C0-\\u00FF.: ]"
+        }
+      ]
+    }
+  },
+  "description": "Workout app for the Pebble Time 2 with live heart-rate zones",
+  "license": "MIT"
+}
