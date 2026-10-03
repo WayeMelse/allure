@@ -45,7 +45,7 @@ typedef enum {
 // Jaune d'accent utilise pour la selection et les fonds d'ecrans
 // secondaires. GColorYellow est plus vif/sature que GColorPastelYellow.
 #define ACCENT_YELLOW GColorYellow
-#define TEXT_ON_YELLOW GColorDukeBlue  // bleu fonce, lisible sur jaune
+#define SECONDARY_TEXT_COLOR GColorDukeBlue  // bleu fonce, remplace le gris (jaune et blanc)
 
 // Reglage du chiffre du compte a rebours (ecran Emery 200x228)
 #define COUNTDOWN_LAYER_HEIGHT 130
@@ -713,7 +713,7 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
         NULL);
   }
 
-  graphics_context_set_text_color(ctx, GColorDarkGray);
+  graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
   graphics_draw_text(
       ctx,
       s_metric_label_text,
@@ -912,10 +912,28 @@ static void workout_select_click_handler(ClickRecognizerRef recognizer,
   }
 }
 
+static bool is_metric_available(WorkoutMetric metric) {
+  if (s_selected_activity != ACTIVITY_TRAINING) {
+    return true;
+  }
+
+  // Entrainement libre : seulement la duree et la frequence cardiaque.
+  return metric == METRIC_DURATION || metric == METRIC_HEART_RATE;
+}
+
+static WorkoutMetric get_next_metric(WorkoutMetric current) {
+  WorkoutMetric next = current;
+
+  do {
+    next = (WorkoutMetric) ((next + 1) % METRIC_COUNT);
+  } while (!is_metric_available(next));
+
+  return next;
+}
+
 static void workout_down_click_handler(ClickRecognizerRef recognizer,
                                        void *context) {
-  s_current_metric =
-      (s_current_metric + 1) % METRIC_COUNT;
+  s_current_metric = get_next_metric(s_current_metric);
 
   layer_mark_dirty(s_workout_layer);
 }
@@ -1102,7 +1120,7 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
         NULL);
   }
 
-  graphics_context_set_text_color(ctx, TEXT_ON_YELLOW);
+  graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
   graphics_draw_text(
       ctx,
       label,
@@ -1150,7 +1168,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
         GTextAlignmentCenter,
         NULL);
 
-    graphics_context_set_text_color(ctx, TEXT_ON_YELLOW);
+    graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
     graphics_draw_text(
         ctx,
         tr(STR_MIN_REQUIRED),
@@ -1258,7 +1276,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
       GTextAlignmentLeft,
       NULL);
 
-  graphics_context_set_text_color(ctx, TEXT_ON_YELLOW);
+  graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
   graphics_draw_text(
       ctx,
       tr(STR_SESSION_DONE),
@@ -1281,17 +1299,19 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
   draw_summary_line(ctx, y, duration_text, "", tr(STR_LABEL_DURATION), value_font);
   y += step;
 
-  draw_summary_line(ctx, y, steps_text, tr(STR_UNIT_STEPS), tr(STR_LABEL_STEPS), value_font);
-  y += step;
+  if (s_selected_activity != ACTIVITY_TRAINING) {
+    draw_summary_line(ctx, y, steps_text, tr(STR_UNIT_STEPS), tr(STR_LABEL_STEPS), value_font);
+    y += step;
 
-  draw_summary_line(ctx, y, distance_text, "km", tr(STR_LABEL_DISTANCE), value_font);
-  y += step;
+    draw_summary_line(ctx, y, distance_text, "km", tr(STR_LABEL_DISTANCE), value_font);
+    y += step;
 
-  draw_summary_line(ctx, y, pace_text, "/km", tr(STR_SUMMARY_PACE), value_font);
-  y += step;
+    draw_summary_line(ctx, y, pace_text, "/km", tr(STR_SUMMARY_PACE), value_font);
+    y += step;
 
-  draw_summary_line(ctx, y, speed_text, "km/h", tr(STR_SUMMARY_SPEED), value_font);
-  y += step;
+    draw_summary_line(ctx, y, speed_text, "km/h", tr(STR_SUMMARY_SPEED), value_font);
+    y += step;
+  }
 
   draw_summary_line(
       ctx, y, bpm_avg_text, bpm_avg_unit, tr(STR_SUMMARY_HR_AVG), bpm_font_avg);
