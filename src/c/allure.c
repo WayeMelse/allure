@@ -1250,6 +1250,9 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
   int calories = get_session_calories();
   snprintf(calories_text, sizeof(calories_text), "%d", calories);
 
+  // Entrainement : on masque les valeurs non mesurees.
+  bool hide_unmeasured = (s_selected_activity == ACTIVITY_TRAINING);
+
   GRect scroll_frame = GRect(0, -s_summary_scroll_offset, bounds.size.w, 600);
 
   // Titre : police personnalisee, avec repli sur Gothic 28 gras si le nom
@@ -1313,16 +1316,22 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
     y += step;
   }
 
-  draw_summary_line(
-      ctx, y, bpm_avg_text, bpm_avg_unit, tr(STR_SUMMARY_HR_AVG), bpm_font_avg);
-  y += step;
+  if (!(hide_unmeasured && average_bpm <= 0)) {
+    draw_summary_line(
+        ctx, y, bpm_avg_text, bpm_avg_unit, tr(STR_SUMMARY_HR_AVG), bpm_font_avg);
+    y += step;
+  }
 
-  draw_summary_line(
-      ctx, y, bpm_max_text, bpm_max_unit, tr(STR_SUMMARY_HR_MAX), bpm_font_max);
-  y += step;
+  if (!(hide_unmeasured && s_bpm_max <= 0)) {
+    draw_summary_line(
+        ctx, y, bpm_max_text, bpm_max_unit, tr(STR_SUMMARY_HR_MAX), bpm_font_max);
+    y += step;
+  }
 
-  draw_summary_line(ctx, y, calories_text, "kcal", tr(STR_SUMMARY_CALORIES), value_font);
-  y += step;
+  if (!(hide_unmeasured && calories <= 0)) {
+    draw_summary_line(ctx, y, calories_text, "kcal", tr(STR_SUMMARY_CALORIES), value_font);
+    y += step;
+  }
 
   s_summary_content_height = (y + 12) - scroll_frame.origin.y;
 }
