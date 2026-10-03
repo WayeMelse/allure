@@ -45,6 +45,7 @@ typedef enum {
 // Jaune d'accent utilise pour la selection et les fonds d'ecrans
 // secondaires. GColorYellow est plus vif/sature que GColorPastelYellow.
 #define ACCENT_YELLOW GColorYellow
+#define TEXT_ON_YELLOW GColorDukeBlue  // bleu fonce, lisible sur jaune
 
 // Reglage du chiffre du compte a rebours (ecran Emery 200x228)
 #define COUNTDOWN_LAYER_HEIGHT 130
@@ -1101,7 +1102,7 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
         NULL);
   }
 
-  graphics_context_set_text_color(ctx, GColorDarkGray);
+  graphics_context_set_text_color(ctx, TEXT_ON_YELLOW);
   graphics_draw_text(
       ctx,
       label,
@@ -1149,7 +1150,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
         GTextAlignmentCenter,
         NULL);
 
-    graphics_context_set_text_color(ctx, GColorDarkGray);
+    graphics_context_set_text_color(ctx, TEXT_ON_YELLOW);
     graphics_draw_text(
         ctx,
         tr(STR_MIN_REQUIRED),
@@ -1257,7 +1258,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
       GTextAlignmentLeft,
       NULL);
 
-  graphics_context_set_text_color(ctx, GColorDarkGray);
+  graphics_context_set_text_color(ctx, TEXT_ON_YELLOW);
   graphics_draw_text(
       ctx,
       tr(STR_SESSION_DONE),
