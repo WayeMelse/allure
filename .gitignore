@@ -5,3 +5,8 @@ apply_*.py
 __pycache__/
 *.bak
 .lock-waf*
+
+*.pbz
+*.log
+.DS_Store
+Thumbs.db
