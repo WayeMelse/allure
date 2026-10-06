@@ -50,6 +50,7 @@ typedef enum {
 // Reglage du chiffre du compte a rebours (ecran Emery 200x228)
 #define COUNTDOWN_LAYER_HEIGHT 130
 #define COUNTDOWN_Y_ADJUST 0
+#define WORKOUT_CLOCK_Y_ADJUST (-8)
 #define SUMMARY_UNIT_Y_OFFSET 6
 
 // Profil utilisateur, regle depuis le telephone (page Clay) et memorise
@@ -94,6 +95,7 @@ static int s_countdown_value = 3;
 static int s_elapsed_seconds = 0;
 
 static bool s_is_paused = false;
+static bool s_stay_awake = false;
 
 static AppTimer *s_countdown_timer;
 
@@ -148,6 +150,25 @@ static void draw_play_icon(GContext *ctx, int16_t x, int16_t y, GColor color) {
 static void draw_stop_icon(GContext *ctx, int16_t x, int16_t y, GColor color) {
   graphics_context_set_fill_color(ctx, color);
   graphics_fill_rect(ctx, GRect(x, y, 14, 14), 0, GCornerNone);
+}
+
+static void draw_bulb_icon(GContext *ctx, int16_t x, int16_t y,
+                             GColor color, bool filled) {
+  graphics_context_set_fill_color(ctx, color);
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_stroke_width(ctx, 2);
+
+  if (filled) {
+    graphics_fill_circle(ctx, GPoint(x + 7, y + 6), 6);
+  } else {
+    graphics_draw_circle(ctx, GPoint(x + 7, y + 6), 6);
+
+    graphics_draw_line(ctx, GPoint(x + 4, y + 5), GPoint(x + 7, y + 10));
+    graphics_draw_line(ctx, GPoint(x + 7, y + 10), GPoint(x + 10, y + 5));
+  }
+
+  graphics_draw_line(ctx, GPoint(x + 4, y + 14), GPoint(x + 10, y + 14));
+  graphics_draw_line(ctx, GPoint(x + 5, y + 17), GPoint(x + 9, y + 17));
 }
 
 static void draw_check_icon(GContext *ctx, int16_t x, int16_t y, GColor color) {
@@ -248,7 +269,8 @@ static void update_clock_text(void) {
 
 static void refresh_heart_rate_if_needed(void) {
   bool should_read =
-      (s_seconds_since_last_bpm_read >= HEART_RATE_REFRESH_INTERVAL_SECONDS) || !s_heart_rate_available;
+      (s_seconds_since_last_bpm_read >= HEART_RATE_REFRESH_INTERVAL_SECONDS) ||
+      !s_heart_rate_available;
 
   if (!should_read) {
     s_seconds_since_last_bpm_read++;
@@ -257,23 +279,18 @@ static void refresh_heart_rate_if_needed(void) {
 
   s_seconds_since_last_bpm_read = 0;
 
-  // Mesure filtree : moyennee par le systeme, mauvaises mesures retirees.
   int filtered_bpm = (int) health_service_peek_current_value(
       HealthMetricHeartRateBPM);
 
-  // Mesure brute : derniere lecture du capteur. On ignore les valeurs
-  // manifestement aberrantes (hors 30-230 bpm).
   int raw_bpm = (int) health_service_peek_current_value(
       HealthMetricHeartRateRawBPM);
+
   bool raw_valid = (raw_bpm >= 30 && raw_bpm <= 230);
 
   int display_bpm =
       (HEART_RATE_DISPLAY_USES_RAW && raw_valid) ? raw_bpm : filtered_bpm;
 
   if (display_bpm <= 0) {
-    // Capteur indisponible (pas de capteur, pas d'app compagnon, ou
-    // simulation non configuree) : on n'invente aucune valeur et on
-    // n'alimente pas les statistiques de la seance avec ce point.
     s_current_bpm = 0;
     s_heart_rate_available = false;
     return;
@@ -282,7 +299,6 @@ static void refresh_heart_rate_if_needed(void) {
   s_current_bpm = display_bpm;
   s_heart_rate_available = true;
 
-  // Statistiques de la seance : uniquement avec la mesure filtree.
   if (filtered_bpm > 0) {
     s_bpm_sum += filtered_bpm;
     s_bpm_sample_count++;
@@ -315,25 +331,22 @@ static void refresh_steps_if_needed(void) {
   }
 
   s_current_steps = steps_since_start;
+
 }
 
-static float get_stride_length_meters(void) {
-  float height_meters = (float) s_profile.height_cm / 100.0f;
-
+static int get_stride_length_cm(void) {
   if (s_selected_activity == ACTIVITY_RUN) {
-    return height_meters * 0.45f;
+    return (s_profile.height_cm * 45) / 100;
   }
 
-  return height_meters * 0.415f;
+  return (s_profile.height_cm * 415) / 1000;
 }
 
 // Distance en metres, en entier : evite tout %f (non supporte par la
 // libc embarquee du firmware Pebble, cause du bug "floating point").
 static int get_distance_meters(void) {
-  float stride_length_meters = get_stride_length_meters();
-  float total_meters = s_current_steps * stride_length_meters;
-
-  return (int) total_meters;
+  int stride_length_cm = get_stride_length_cm();
+  return (s_current_steps * stride_length_cm) / 100;
 }
 
 static int get_average_bpm(void) {
@@ -424,7 +437,7 @@ static GColor get_heart_rate_color(int bpm) {
     return GColorRajah;
   }
 
-  return GColorSunsetOrange;
+  return GColorLavenderIndigo;
 }
 
 static void get_metric_text(void) {
@@ -637,7 +650,7 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
       GRect(0, 0, content_width, half_height),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentCenter);
-  int16_t clock_y = (half_height - clock_size.h) / 2;
+  int16_t clock_y = (half_height - clock_size.h) / 2 + WORKOUT_CLOCK_Y_ADJUST;
   if (clock_y < 0) {
     clock_y = 0;
   }
@@ -676,7 +689,14 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
         GTextOverflowModeTrailingEllipsis,
         GTextAlignmentLeft);
 
-    int16_t block_width = value_size.w + 6 + 40;
+    int16_t unit_width = graphics_text_layout_get_content_size(
+        s_metric_unit_text,
+        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+        GRect(0, 0, 80, 24),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft).w;
+
+    int16_t block_width = value_size.w + 6 + unit_width;
     int16_t block_x = (content_width - block_width) / 2;
     if (block_x < 0) {
       block_x = 0;
@@ -730,9 +750,11 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
     draw_pause_icon(ctx, content_width + 11, 28, GColorWhite);
   }
 
-  // Bouton du milieu : icone stop visible seulement en pause
+  // Bouton du milieu : ampoule en séance, stop en pause
   if (s_is_paused) {
-    draw_stop_icon(ctx, content_width + 10, 100, GColorWhite);
+    draw_stop_icon(ctx, content_width + 10, 107, GColorWhite);
+  } else {
+    draw_bulb_icon(ctx, content_width + 10, 105, GColorWhite, s_stay_awake);
   }
 
   // Bouton bas : metrique suivante. "MET" remplace par des points de
@@ -742,7 +764,7 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
       ctx,
       "...",
       fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(content_width, 156, side_bar_width, 22),
+      GRect(content_width, 179, side_bar_width, 22),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentCenter,
       NULL);
@@ -944,11 +966,23 @@ static void workout_back_click_handler(ClickRecognizerRef recognizer,
   // La seule sortie prevue passe par la pause puis l'ecran de confirmation.
 }
 
+static void workout_back_long_click_handler(ClickRecognizerRef recognizer,
+                                          void *context) {
+  s_stay_awake = !s_stay_awake;
+  light_enable(s_stay_awake);
+  vibes_short_pulse();
+}
+
 static void workout_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, workout_up_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, workout_select_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, workout_down_click_handler);
   window_single_click_subscribe(BUTTON_ID_BACK, workout_back_click_handler);
+  window_long_click_subscribe(
+      BUTTON_ID_SELECT,
+      700,
+      workout_back_long_click_handler,
+      NULL);
 }
 
 static void workout_window_load(Window *window) {
@@ -958,6 +992,8 @@ static void workout_window_load(Window *window) {
   window_set_background_color(window, GColorWhite);
 
   s_is_paused = false;
+  s_stay_awake = false;
+  light_enable(false);
   s_current_bpm = 0;
   s_heart_rate_available = false;
   s_seconds_since_last_bpm_read = 0;
