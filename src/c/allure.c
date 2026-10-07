@@ -117,6 +117,9 @@ static int s_seconds_since_last_steps_read = 0;
 static long s_bpm_sum = 0;
 static int s_bpm_sample_count = 0;
 static int s_bpm_max = 0;
+// Somme des zones (1 a 5) de chaque echantillon de FC de la seance.
+static long s_zone_points_sum = 0;
+static int get_raw_heart_rate_zone(int bpm);
 
 // Effort ressenti, choisi sur l'ecran de fin de seance.
 // s_effort_choice : ligne selectionnee (0 = continuer, 1 a 4 = niveau).
@@ -308,6 +311,7 @@ static void refresh_heart_rate_if_needed(void) {
   if (filtered_bpm > 0) {
     s_bpm_sum += filtered_bpm;
     s_bpm_sample_count++;
+    s_zone_points_sum += get_raw_heart_rate_zone(filtered_bpm) + 1;
 
     if (filtered_bpm > s_bpm_max) {
       s_bpm_max = filtered_bpm;
@@ -435,6 +439,18 @@ static int s_heart_rate_zone = -1;
 static int get_zone_upper_limit_bpm(int zone, int max_bpm) {
   static const int percents[4] = {60, 70, 80, 90};
   return (max_bpm * percents[zone]) / 100;
+}
+
+// Zone brute (0 a 4) sans hysteresis, pour les statistiques de la seance.
+static int get_raw_heart_rate_zone(int bpm) {
+  int max_bpm = get_max_heart_rate();
+  int zone = 0;
+
+  while (zone < 4 && bpm >= get_zone_upper_limit_bpm(zone, max_bpm)) {
+    zone++;
+  }
+
+  return zone;
 }
 
 static int get_heart_rate_zone(int bpm) {
@@ -1050,6 +1066,7 @@ static void workout_window_load(Window *window) {
 
   s_bpm_sum = 0;
   s_bpm_sample_count = 0;
+  s_zone_points_sum = 0;
   s_effort_choice = 0;
   s_effort_rating = 0;
   s_bpm_max = 0;
@@ -1337,18 +1354,10 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
 static int get_effort_score(void) {
   static const int rating_scores[5] = {0, 10, 25, 40, 50};
   int hr_score = 0;
-  int average_bpm = get_average_bpm();
 
-  if (average_bpm > 0) {
-    int max_bpm = get_max_heart_rate();
-    int zone = 0;
-
-    while (zone < 4 &&
-           average_bpm >= get_zone_upper_limit_bpm(zone, max_bpm)) {
-      zone++;
-    }
-
-    hr_score = (zone + 1) * 10;
+  // Zone moyenne mesuree a chaque echantillon (x10), de 10 a 50.
+  if (s_bpm_sample_count > 0) {
+    hr_score = (int) ((s_zone_points_sum * 10) / s_bpm_sample_count);
   }
 
   int rating_score = rating_scores[s_effort_rating];
@@ -1549,6 +1558,25 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
 
   int16_t y = scroll_frame.origin.y + 84;
   int16_t step = 72;
+
+  if (s_effort_rating > 0) {
+    const char *effort_text = tr(STR_EFFORT_RELAXED + (s_effort_rating - 1));
+    GFont effort_font = value_font;
+    GSize effort_size = graphics_text_layout_get_content_size(
+        effort_text,
+        value_font,
+        GRect(0, 0, 400, 50),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft);
+
+    if (effort_size.w > bounds.size.w - 12) {
+      effort_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+    }
+
+    draw_summary_line(
+        ctx, y, effort_text, "", tr(STR_SUMMARY_EFFORT), effort_font);
+    y += step;
+  }
 
   draw_summary_line(ctx, y, duration_text, "", tr(STR_LABEL_DURATION), value_font);
   y += step;

@@ -45,6 +45,7 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_EFFORT_DEMANDING]   = "Demanding",
     [STR_EFFORT_EXHAUSTING]  = "Exhausting",
     [STR_KEEP_GOING]         = "Keep going",
+    [STR_SUMMARY_EFFORT]     = "EFFORT",
   },
   [LANGUAGE_FR] = {
     [STR_ACTIVITY_WALK]      = "Marche",
@@ -73,6 +74,7 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_EFFORT_DEMANDING]   = "Soutenu",
     [STR_EFFORT_EXHAUSTING]  = "Épuisant",
     [STR_KEEP_GOING]         = "Continuer",
+    [STR_SUMMARY_EFFORT]     = "EFFORT",
   },
   [LANGUAGE_DE] = {
     [STR_ACTIVITY_WALK]      = "Gehen",
@@ -101,6 +103,7 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_EFFORT_DEMANDING]   = "Anstrengend",
     [STR_EFFORT_EXHAUSTING]  = "Erschöpfend",
     [STR_KEEP_GOING]         = "Weitermachen",
+    [STR_SUMMARY_EFFORT]     = "ANSTRENGUNG",
   },
   [LANGUAGE_ES] = {
     [STR_ACTIVITY_WALK]      = "Caminar",
@@ -129,6 +132,7 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_EFFORT_DEMANDING]   = "Exigente",
     [STR_EFFORT_EXHAUSTING]  = "Agotador",
     [STR_KEEP_GOING]         = "Continuar",
+    [STR_SUMMARY_EFFORT]     = "ESFUERZO",
   },
   [LANGUAGE_IT] = {
     [STR_ACTIVITY_WALK]      = "Camminata",
@@ -157,6 +161,7 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_EFFORT_DEMANDING]   = "Impegnativo",
     [STR_EFFORT_EXHAUSTING]  = "Estenuante",
     [STR_KEEP_GOING]         = "Continua",
+    [STR_SUMMARY_EFFORT]     = "SFORZO",
   },
   [LANGUAGE_PT] = {
     [STR_ACTIVITY_WALK]      = "Caminhada",
@@ -185,6 +190,7 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_EFFORT_DEMANDING]   = "Exigente",
     [STR_EFFORT_EXHAUSTING]  = "Exaustivo",
     [STR_KEEP_GOING]         = "Continuar",
+    [STR_SUMMARY_EFFORT]     = "ESFORÇO",
   },
 };
 
