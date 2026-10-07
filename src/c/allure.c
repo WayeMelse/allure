@@ -20,6 +20,8 @@ typedef enum {
 } WorkoutMetric;
 
 #define MINIMUM_SESSION_SECONDS 120
+// 1 = ligne de debug du score d'effort dans le resume (ne jamais commiter a 1).
+#define EFFORT_DEBUG 0
 #define SUMMARY_SCROLL_STEP 30
 // Frequence de relecture du compteur de pas (et donc de la distance,
 // de l'allure et de la vitesse, qui en decoulent). Arbitrairement fixee
@@ -1577,6 +1579,28 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
         ctx, y, effort_text, "", tr(STR_SUMMARY_EFFORT), effort_font);
     y += step;
   }
+
+#if EFFORT_DEBUG
+  {
+    char debug_text[40];
+    int debug_zone_x10 = (s_bpm_sample_count > 0)
+        ? (int) ((s_zone_points_sum * 10) / s_bpm_sample_count)
+        : 0;
+
+    snprintf(
+        debug_text,
+        sizeof(debug_text),
+        "%d/%d/%d/%d",
+        get_effort_score(),
+        debug_zone_x10,
+        average_bpm,
+        s_effort_rating);
+    draw_summary_line(
+        ctx, y, debug_text, "", "DEBUG SCORE/ZONE/BPM/REP",
+        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+    y += step;
+  }
+#endif
 
   draw_summary_line(ctx, y, duration_text, "", tr(STR_LABEL_DURATION), value_font);
   y += step;
