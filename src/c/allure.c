@@ -118,6 +118,12 @@ static long s_bpm_sum = 0;
 static int s_bpm_sample_count = 0;
 static int s_bpm_max = 0;
 
+// Effort ressenti, choisi sur l'ecran de fin de seance.
+// s_effort_choice : ligne selectionnee (0 = continuer, 1 a 4 = niveau).
+// s_effort_rating : niveau valide (0 = pas de reponse, 1 a 4).
+static int s_effort_choice = 0;
+static int s_effort_rating = 0;
+
 // Defilement vertical de l'ecran de resume
 static int s_summary_scroll_offset = 0;
 static int s_summary_content_height = 0;
@@ -1044,6 +1050,8 @@ static void workout_window_load(Window *window) {
 
   s_bpm_sum = 0;
   s_bpm_sample_count = 0;
+  s_effort_choice = 0;
+  s_effort_rating = 0;
   s_bpm_max = 0;
 
   health_service_set_heart_rate_sample_period(1);
