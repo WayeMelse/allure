@@ -1406,7 +1406,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
   if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS) {
     int minutes = s_elapsed_seconds / 60;
     int seconds = s_elapsed_seconds % 60;
-    char duration_text[8];
+    char duration_text[16];
 
     snprintf(
         duration_text,
@@ -1452,7 +1452,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
   int seconds = s_elapsed_seconds % 60;
   int distance_meters = get_distance_meters();
 
-  char duration_text[8];
+  char duration_text[16];
   char steps_text[16];
   char distance_text[16];
   char pace_text[16];
