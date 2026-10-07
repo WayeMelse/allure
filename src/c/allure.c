@@ -1101,8 +1101,12 @@ static void draw_arrow_icon(GContext *ctx, int16_t x, int16_t y,
 
 // Ecran de fin de seance : ligne 0 = continuer, lignes 1 a 4 = effort ressenti.
 #define EFFORT_ROW_COUNT 5
+#define EFFORT_ICON_UP_CENTER_Y 44
+#define EFFORT_ICON_MID_CENTER_Y 116
+#define EFFORT_ICON_DOWN_CENTER_Y 188
 #define EFFORT_ROW_HEIGHT 30
-#define EFFORT_LIST_TOP 66
+#define EFFORT_LIST_TOP 62
+#define EFFORT_SEPARATOR_GAP 8
 
 static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
@@ -1125,18 +1129,26 @@ static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
       0,
       GCornerNone);
 
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
   graphics_draw_text(
       ctx,
       tr(STR_EFFORT_QUESTION),
-      font_24,
-      GRect(6, 2, content_width - 12, 60),
+      font_18,
+      GRect(6, 8, content_width - 12, 50),
       GTextOverflowModeWordWrap,
       GTextAlignmentCenter,
       NULL);
 
+  static const GColor effort_colors[4] = {
+    GColorPictonBlue,
+    GColorBrightGreen,
+    GColorRajah,
+    GColorLavenderIndigo
+  };
+
   for (int i = 0; i < EFFORT_ROW_COUNT; i++) {
-    int16_t y = EFFORT_LIST_TOP + i * EFFORT_ROW_HEIGHT;
+    int16_t y = EFFORT_LIST_TOP + i * EFFORT_ROW_HEIGHT +
+                ((i > 0) ? EFFORT_SEPARATOR_GAP : 0);
     const char *label = (i == 0)
         ? tr(STR_KEEP_GOING)
         : tr(STR_EFFORT_RELAXED + (i - 1));
@@ -1155,6 +1167,8 @@ static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
       text_y = y + 1;
     }
 
+    GColor text_color = GColorBlack;
+
     if (selected) {
       graphics_context_set_fill_color(ctx, GColorBlack);
       graphics_fill_rect(
@@ -1162,11 +1176,20 @@ static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
           GRect(4, y, content_width - 8, EFFORT_ROW_HEIGHT - 2),
           4,
           GCornersAll);
+
+      if (i == 0) {
+        text_color = GColorWhite;
+      } else {
+        graphics_context_set_fill_color(ctx, effort_colors[i - 1]);
+        graphics_fill_rect(
+            ctx,
+            GRect(6, y + 2, content_width - 12, EFFORT_ROW_HEIGHT - 6),
+            3,
+            GCornersAll);
+      }
     }
 
-    graphics_context_set_text_color(
-        ctx,
-        selected ? GColorWhite : GColorBlack);
+    graphics_context_set_text_color(ctx, text_color);
     graphics_draw_text(
         ctx,
         label,
@@ -1177,9 +1200,20 @@ static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
         NULL);
   }
 
-  draw_arrow_icon(ctx, content_width + 10, 50, GColorWhite, true);
-  draw_check_icon(ctx, content_width + 9, 106, GColorWhite);
-  draw_arrow_icon(ctx, content_width + 10, 172, GColorWhite, false);
+  graphics_context_set_stroke_color(ctx, GColorBlack);
+  graphics_draw_line(
+      ctx,
+      GPoint(20, EFFORT_LIST_TOP + EFFORT_ROW_HEIGHT + 3),
+      GPoint(content_width - 20, EFFORT_LIST_TOP + EFFORT_ROW_HEIGHT + 3));
+
+  draw_arrow_icon(
+      ctx, content_width + 10, EFFORT_ICON_UP_CENTER_Y - 6,
+      GColorWhite, true);
+  draw_check_icon(
+      ctx, content_width + 9, EFFORT_ICON_MID_CENTER_Y - 5, GColorWhite);
+  draw_arrow_icon(
+      ctx, content_width + 10, EFFORT_ICON_DOWN_CENTER_Y - 6,
+      GColorWhite, false);
 }
 
 static void stop_confirm_up_click_handler(ClickRecognizerRef recognizer,
@@ -1198,6 +1232,8 @@ static void stop_confirm_down_click_handler(ClickRecognizerRef recognizer,
 static void stop_confirm_select_click_handler(ClickRecognizerRef recognizer,
                                               void *context) {
   if (s_effort_choice == 0) {
+    s_is_paused = false;
+    layer_mark_dirty(s_workout_layer);
     window_stack_pop(true);
     return;
   }
@@ -1211,6 +1247,8 @@ static void stop_confirm_select_click_handler(ClickRecognizerRef recognizer,
 
 static void stop_confirm_back_click_handler(ClickRecognizerRef recognizer,
                                             void *context) {
+  s_is_paused = false;
+  layer_mark_dirty(s_workout_layer);
   window_stack_pop(true);
 }
 
