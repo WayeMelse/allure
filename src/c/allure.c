@@ -1074,10 +1074,42 @@ static void workout_window_unload(Window *window) {
   s_workout_layer = NULL;
 }
 
+static void draw_arrow_icon(GContext *ctx, int16_t x, int16_t y,
+                            GColor color, bool up) {
+  GPoint points[3];
+
+  if (up) {
+    points[0] = GPoint(x + 7, y);
+    points[1] = GPoint(x, y + 10);
+    points[2] = GPoint(x + 14, y + 10);
+  } else {
+    points[0] = GPoint(x, y);
+    points[1] = GPoint(x + 14, y);
+    points[2] = GPoint(x + 7, y + 10);
+  }
+
+  GPathInfo info = {
+    .num_points = 3,
+    .points = points
+  };
+
+  GPath *path = gpath_create(&info);
+  graphics_context_set_fill_color(ctx, color);
+  gpath_draw_filled(ctx, path);
+  gpath_destroy(path);
+}
+
+// Ecran de fin de seance : ligne 0 = continuer, lignes 1 a 4 = effort ressenti.
+#define EFFORT_ROW_COUNT 5
+#define EFFORT_ROW_HEIGHT 30
+#define EFFORT_LIST_TOP 66
+
 static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   const int16_t side_bar_width = 34;
   int16_t content_width = bounds.size.w - side_bar_width;
+  GFont font_24 = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont font_18 = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
 
   graphics_context_set_fill_color(ctx, ACCENT_YELLOW);
   graphics_fill_rect(
@@ -1093,68 +1125,107 @@ static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
       0,
       GCornerNone);
 
-  draw_activity_emoji(
-      ctx,
-      s_selected_activity,
-      GRect(0, 46, content_width, 60),
-      GColorBlack);
-
   graphics_context_set_text_color(ctx, GColorBlack);
-  
-graphics_draw_text(
+  graphics_draw_text(
       ctx,
-      tr(STR_STOP_QUESTION),
-      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-      GRect(6, 118, content_width - 12, 64),
+      tr(STR_EFFORT_QUESTION),
+      font_24,
+      GRect(6, 2, content_width - 12, 60),
       GTextOverflowModeWordWrap,
       GTextAlignmentCenter,
       NULL);
 
-  // Coche vectorielle sur le bouton haut, au lieu du glyphe "v".
-  draw_check_icon(ctx, content_width + 9, 48, GColorWhite);
+  for (int i = 0; i < EFFORT_ROW_COUNT; i++) {
+    int16_t y = EFFORT_LIST_TOP + i * EFFORT_ROW_HEIGHT;
+    const char *label = (i == 0)
+        ? tr(STR_KEEP_GOING)
+        : tr(STR_EFFORT_RELAXED + (i - 1));
+    bool selected = (i == s_effort_choice);
 
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(
-      ctx,
-      "x",
-      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-      GRect(content_width, 168, side_bar_width, 30),
-      GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentCenter,
-      NULL);
+    GFont row_font = font_24;
+    int16_t text_y = y - 3;
+    GSize label_size = graphics_text_layout_get_content_size(
+        label,
+        font_24,
+        GRect(0, 0, 400, 40),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft);
+    if (label_size.w > content_width - 20) {
+      row_font = font_18;
+      text_y = y + 1;
+    }
+
+    if (selected) {
+      graphics_context_set_fill_color(ctx, GColorBlack);
+      graphics_fill_rect(
+          ctx,
+          GRect(4, y, content_width - 8, EFFORT_ROW_HEIGHT - 2),
+          4,
+          GCornersAll);
+    }
+
+    graphics_context_set_text_color(
+        ctx,
+        selected ? GColorWhite : GColorBlack);
+    graphics_draw_text(
+        ctx,
+        label,
+        row_font,
+        GRect(6, text_y, content_width - 12, EFFORT_ROW_HEIGHT),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentCenter,
+        NULL);
+  }
+
+  draw_arrow_icon(ctx, content_width + 10, 50, GColorWhite, true);
+  draw_check_icon(ctx, content_width + 9, 106, GColorWhite);
+  draw_arrow_icon(ctx, content_width + 10, 172, GColorWhite, false);
 }
 
 static void stop_confirm_up_click_handler(ClickRecognizerRef recognizer,
                                           void *context) {
+  s_effort_choice =
+      (s_effort_choice + EFFORT_ROW_COUNT - 1) % EFFORT_ROW_COUNT;
+  layer_mark_dirty(s_stop_confirm_layer);
+}
+
+static void stop_confirm_down_click_handler(ClickRecognizerRef recognizer,
+                                            void *context) {
+  s_effort_choice = (s_effort_choice + 1) % EFFORT_ROW_COUNT;
+  layer_mark_dirty(s_stop_confirm_layer);
+}
+
+static void stop_confirm_select_click_handler(ClickRecognizerRef recognizer,
+                                              void *context) {
+  if (s_effort_choice == 0) {
+    window_stack_pop(true);
+    return;
+  }
+
+  s_effort_rating = s_effort_choice;
   tick_timer_service_unsubscribe();
   window_stack_pop(true);
   window_stack_pop(true);
   window_stack_push(s_summary_window, true);
 }
 
-static void stop_confirm_down_click_handler(ClickRecognizerRef recognizer,
+static void stop_confirm_back_click_handler(ClickRecognizerRef recognizer,
                                             void *context) {
   window_stack_pop(true);
 }
 
 static void stop_confirm_click_config_provider(void *context) {
-  window_single_click_subscribe(
-      BUTTON_ID_UP,
-      stop_confirm_up_click_handler);
-
-  window_single_click_subscribe(
-      BUTTON_ID_DOWN,
-      stop_confirm_down_click_handler);
-
-  window_single_click_subscribe(
-      BUTTON_ID_BACK,
-      stop_confirm_down_click_handler);
+  window_single_click_subscribe(BUTTON_ID_UP, stop_confirm_up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, stop_confirm_down_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, stop_confirm_select_click_handler);
+  window_single_click_subscribe(BUTTON_ID_BACK, stop_confirm_back_click_handler);
 }
 
 static void stop_confirm_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
 
+  s_effort_choice = 0;
   s_stop_confirm_layer = layer_create(bounds);
   layer_set_update_proc(
       s_stop_confirm_layer,
