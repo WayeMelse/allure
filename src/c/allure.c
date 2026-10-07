@@ -1277,6 +1277,18 @@ static void stop_confirm_window_unload(Window *window) {
   s_stop_confirm_layer = NULL;
 }
 
+// Couleur du texte secondaire du resume, adaptee au fond pour rester lisible.
+static GColor s_summary_label_color;
+
+static GColor get_label_color_for_background(GColor background) {
+  if (gcolor_equal(background, GColorPictonBlue) ||
+      gcolor_equal(background, GColorLavenderIndigo)) {
+    return GColorBlack;
+  }
+
+  return SECONDARY_TEXT_COLOR;
+}
+
 static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
                               const char *unit, const char *label,
                               GFont value_font) {
@@ -1309,7 +1321,7 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
         NULL);
   }
 
-  graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
+  graphics_context_set_text_color(ctx, s_summary_label_color);
   graphics_draw_text(
       ctx,
       label,
@@ -1369,11 +1381,11 @@ static GColor get_effort_color(void) {
 static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
 
-  graphics_context_set_fill_color(
-      ctx,
-      (s_elapsed_seconds < MINIMUM_SESSION_SECONDS)
-          ? ACCENT_YELLOW
-          : get_effort_color());
+  GColor background = (s_elapsed_seconds < MINIMUM_SESSION_SECONDS)
+      ? ACCENT_YELLOW
+      : get_effort_color();
+  s_summary_label_color = get_label_color_for_background(background);
+  graphics_context_set_fill_color(ctx, background);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
   if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS) {
@@ -1518,7 +1530,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
       GTextAlignmentLeft,
       NULL);
 
-  graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
+  graphics_context_set_text_color(ctx, s_summary_label_color);
   graphics_draw_text(
       ctx,
       tr(STR_SESSION_DONE),
