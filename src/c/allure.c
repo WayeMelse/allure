@@ -420,24 +420,59 @@ static int get_max_heart_rate(void) {
 //   Zone 3 : 70 a 80 %      (aerobie / tempo)         -> jaune
 //   Zone 4 : 80 a 90 %      (intense / seuil)         -> orange
 //   Zone 5 : 90 % et plus   (maximal)                 -> rouge pastel
+// Hysteresis : la couleur ne change qu'apres avoir depasse le seuil de
+// quelques bpm, pour eviter les clignotements autour d'une limite de zone.
+#define HEART_RATE_ZONE_HYSTERESIS_BPM 3
+
+static int s_heart_rate_zone = -1;
+
+static int get_zone_upper_limit_bpm(int zone, int max_bpm) {
+  static const int percents[4] = {60, 70, 80, 90};
+  return (max_bpm * percents[zone]) / 100;
+}
+
+static int get_heart_rate_zone(int bpm) {
+  int max_bpm = get_max_heart_rate();
+  int zone = s_heart_rate_zone;
+
+  if (zone < 0) {
+    zone = 0;
+    while (zone < 4 && bpm >= get_zone_upper_limit_bpm(zone, max_bpm)) {
+      zone++;
+    }
+  } else {
+    while (zone < 4 &&
+           bpm >= get_zone_upper_limit_bpm(zone, max_bpm) +
+                  HEART_RATE_ZONE_HYSTERESIS_BPM) {
+      zone++;
+    }
+
+    while (zone > 0 &&
+           bpm < get_zone_upper_limit_bpm(zone - 1, max_bpm) -
+                 HEART_RATE_ZONE_HYSTERESIS_BPM) {
+      zone--;
+    }
+  }
+
+  s_heart_rate_zone = zone;
+  return zone;
+}
+
 static GColor get_heart_rate_color(int bpm) {
+  static const GColor zone_colors[5] = {
+    GColorPictonBlue,
+    GColorBrightGreen,
+    ACCENT_YELLOW,
+    GColorRajah,
+    GColorLavenderIndigo
+  };
+
   if (!s_heart_rate_available) {
+    s_heart_rate_zone = -1;
     return GColorLightGray;
   }
 
-  int max_bpm = get_max_heart_rate();
-
-  if (bpm < (max_bpm * 60) / 100) {
-    return GColorPictonBlue;
-  } else if (bpm < (max_bpm * 70) / 100) {
-    return GColorBrightGreen;
-  } else if (bpm < (max_bpm * 80) / 100) {
-    return ACCENT_YELLOW;
-  } else if (bpm < (max_bpm * 90) / 100) {
-    return GColorRajah;
-  }
-
-  return GColorLavenderIndigo;
+  return zone_colors[get_heart_rate_zone(bpm)];
 }
 
 static void get_metric_text(void) {
@@ -996,6 +1031,7 @@ static void workout_window_load(Window *window) {
   light_enable(false);
   s_current_bpm = 0;
   s_heart_rate_available = false;
+  s_heart_rate_zone = -1;
   s_seconds_since_last_bpm_read = 0;
   s_current_steps = 0;
   s_seconds_since_last_steps_read = 0;
