@@ -35,6 +35,9 @@ typedef enum {
 // Les statistiques de la seance (moyenne, max, calories) utilisent
 // toujours la mesure filtree.
 #define HEART_RATE_DISPLAY_USES_RAW 1
+// 1 = la zone moyenne du score d'effort utilise la mesure affichee (brute
+// si valide), sans le retard du filtre systeme. 0 = mesure filtree.
+#define EFFORT_ZONE_USES_DISPLAY_BPM 1
 
 // Profil utilisateur : valeurs par defaut, avant tout reglage sur le
 // telephone. Le profil reel est lu dans s_profile (voir plus bas).
@@ -313,7 +316,8 @@ static void refresh_heart_rate_if_needed(void) {
   if (filtered_bpm > 0) {
     s_bpm_sum += filtered_bpm;
     s_bpm_sample_count++;
-    s_zone_points_sum += get_raw_heart_rate_zone(filtered_bpm) + 1;
+    s_zone_points_sum += get_raw_heart_rate_zone(
+        EFFORT_ZONE_USES_DISPLAY_BPM ? display_bpm : filtered_bpm) + 1;
 
     if (filtered_bpm > s_bpm_max) {
       s_bpm_max = filtered_bpm;
