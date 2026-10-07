@@ -1320,10 +1320,60 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
       NULL);
 }
 
+// Score d'effort de 10 a 50 : FC moyenne (zone x 10) et effort ressenti.
+// Renvoie 0 si aucune donnee exploitable.
+static int get_effort_score(void) {
+  static const int rating_scores[5] = {0, 10, 25, 40, 50};
+  int hr_score = 0;
+  int average_bpm = get_average_bpm();
+
+  if (average_bpm > 0) {
+    int max_bpm = get_max_heart_rate();
+    int zone = 0;
+
+    while (zone < 4 &&
+           average_bpm >= get_zone_upper_limit_bpm(zone, max_bpm)) {
+      zone++;
+    }
+
+    hr_score = (zone + 1) * 10;
+  }
+
+  int rating_score = rating_scores[s_effort_rating];
+
+  if (hr_score > 0 && rating_score > 0) {
+    return (hr_score + 2 * rating_score) / 3;
+  }
+
+  return (hr_score > 0) ? hr_score : rating_score;
+}
+
+static GColor get_effort_color(void) {
+  int score = get_effort_score();
+
+  if (score == 0) {
+    return GColorLightGray;
+  } else if (score < 18) {
+    return GColorPictonBlue;
+  } else if (score < 28) {
+    return GColorBrightGreen;
+  } else if (score < 38) {
+    return ACCENT_YELLOW;
+  } else if (score < 46) {
+    return GColorRajah;
+  }
+
+  return GColorLavenderIndigo;
+}
+
 static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
 
-  graphics_context_set_fill_color(ctx, ACCENT_YELLOW);
+  graphics_context_set_fill_color(
+      ctx,
+      (s_elapsed_seconds < MINIMUM_SESSION_SECONDS)
+          ? ACCENT_YELLOW
+          : get_effort_color());
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
   if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS) {
