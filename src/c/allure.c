@@ -78,7 +78,7 @@ static UserProfile s_profile = {
 // Les bornes absolues (cm) doivent rester identiques a celles de config.js.
 // Les bornes relatives (pourcentage de la taille) ne sont verifiees qu'ici,
 // car la page Clay ne connait pas la taille au moment du reglage.
-#define STRIDE_PERSIST_KEY 2
+#define STRIDE_PERSIST_KEY 3
 #define STRIDE_WALK_MIN_CM 30
 #define STRIDE_WALK_MAX_CM 100
 #define STRIDE_RUN_MIN_CM 40
@@ -93,14 +93,18 @@ static UserProfile s_profile = {
 #define STRIDE_RUN_DEFAULT_PERMILLE 550
 
 typedef struct {
-  int16_t enabled;  // 0 = pas estime a partir de la taille
+  int16_t units_imperial;  // 0 = metrique, 1 = imperial (affichage)
+  int16_t walk_enabled;    // 0 = pas de marche estime a partir de la taille
   int16_t walk_cm;
+  int16_t run_enabled;     // 0 = pas de course estime a partir de la taille
   int16_t run_cm;
 } StrideSettings;
 
 static StrideSettings s_stride = {
-  .enabled = 0,
+  .units_imperial = 0,
+  .walk_enabled = 0,
   .walk_cm = 0,
+  .run_enabled = 0,
   .run_cm = 0
 };
 
@@ -404,18 +408,18 @@ static int get_stride_length_cm_for(Activity activity) {
   int walk_cm = get_default_stride_cm(ACTIVITY_WALK);
   int run_cm = get_default_stride_cm(ACTIVITY_RUN);
 
-  if (s_stride.enabled) {
-    if (is_custom_stride_valid(s_stride.walk_cm,
-                               STRIDE_WALK_MIN_CM, STRIDE_WALK_MAX_CM,
-                               STRIDE_WALK_MIN_PERCENT, STRIDE_WALK_MAX_PERCENT)) {
-      walk_cm = s_stride.walk_cm;
-    }
+  if (s_stride.walk_enabled &&
+      is_custom_stride_valid(s_stride.walk_cm,
+                             STRIDE_WALK_MIN_CM, STRIDE_WALK_MAX_CM,
+                             STRIDE_WALK_MIN_PERCENT, STRIDE_WALK_MAX_PERCENT)) {
+    walk_cm = s_stride.walk_cm;
+  }
 
-    if (is_custom_stride_valid(s_stride.run_cm,
-                               STRIDE_RUN_MIN_CM, STRIDE_RUN_MAX_CM,
-                               STRIDE_RUN_MIN_PERCENT, STRIDE_RUN_MAX_PERCENT)) {
-      run_cm = s_stride.run_cm;
-    }
+  if (s_stride.run_enabled &&
+      is_custom_stride_valid(s_stride.run_cm,
+                             STRIDE_RUN_MIN_CM, STRIDE_RUN_MAX_CM,
+                             STRIDE_RUN_MIN_PERCENT, STRIDE_RUN_MAX_PERCENT)) {
+    run_cm = s_stride.run_cm;
   }
 
   // Coherence : un pas de course n'est jamais plus court qu'un pas de marche.
@@ -1792,12 +1796,24 @@ static void profile_sanitize(void) {
   if (s_profile.weight_kg > 250) s_profile.weight_kg = 250;
 }
 
+// Conversions imperial -> metrique, en entiers (arrondi au plus proche).
+// 1 pouce = 2,54 cm ; 1 livre = 0,45359 kg.
+static int inches_to_cm(int inches) {
+  return (inches * 254 + 50) / 100;
+}
+
+static int pounds_to_kg(int pounds) {
+  return (int) (((int64_t) pounds * 45359 + 50000) / 100000);
+}
+
 static void stride_load(void) {
   if (persist_exists(STRIDE_PERSIST_KEY)) {
     persist_read_data(STRIDE_PERSIST_KEY, &s_stride, sizeof(s_stride));
   }
 
-  s_stride.enabled = s_stride.enabled ? 1 : 0;
+  s_stride.units_imperial = s_stride.units_imperial ? 1 : 0;
+  s_stride.walk_enabled = s_stride.walk_enabled ? 1 : 0;
+  s_stride.run_enabled = s_stride.run_enabled ? 1 : 0;
 }
 
 static void stride_save(void) {
@@ -1849,19 +1865,51 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     s_profile.weight_kg = (int16_t) tuple_to_int(tuple);
   }
 
-  tuple = dict_find(iter, MESSAGE_KEY_StrideCustom);
+  int imperial = s_stride.units_imperial;
+
+  tuple = dict_find(iter, MESSAGE_KEY_Units);
   if (tuple) {
-    s_stride.enabled = (tuple_to_int(tuple) == 1) ? 1 : 0;
+    imperial = (tuple_to_int(tuple) == 1) ? 1 : 0;
+    s_stride.units_imperial = imperial;
   }
 
-  tuple = dict_find(iter, MESSAGE_KEY_StrideWalk);
-  if (tuple) {
-    s_stride.walk_cm = (int16_t) tuple_to_int(tuple);
+  // En imperial, taille (pieds + pouces) et poids (livres) remplacent les
+  // valeurs metriques lues plus haut (curseurs masques sur la page).
+  if (imperial) {
+    Tuple *feet = dict_find(iter, MESSAGE_KEY_HeightFt);
+    Tuple *inches = dict_find(iter, MESSAGE_KEY_HeightIn);
+    Tuple *pounds = dict_find(iter, MESSAGE_KEY_WeightLb);
+
+    if (feet && inches) {
+      s_profile.height_cm = (int16_t) inches_to_cm(
+          tuple_to_int(feet) * 12 + tuple_to_int(inches));
+    }
+
+    if (pounds) {
+      s_profile.weight_kg = (int16_t) pounds_to_kg(tuple_to_int(pounds));
+    }
   }
 
-  tuple = dict_find(iter, MESSAGE_KEY_StrideRun);
+  tuple = dict_find(iter, MESSAGE_KEY_StrideWalkOn);
   if (tuple) {
-    s_stride.run_cm = (int16_t) tuple_to_int(tuple);
+    s_stride.walk_enabled = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, imperial ? MESSAGE_KEY_StrideWalkInch : MESSAGE_KEY_StrideWalk);
+  if (tuple) {
+    int value = tuple_to_int(tuple);
+    s_stride.walk_cm = (int16_t) (imperial ? inches_to_cm(value) : value);
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_StrideRunOn);
+  if (tuple) {
+    s_stride.run_enabled = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, imperial ? MESSAGE_KEY_StrideRunInch : MESSAGE_KEY_StrideRun);
+  if (tuple) {
+    int value = tuple_to_int(tuple);
+    s_stride.run_cm = (int16_t) (imperial ? inches_to_cm(value) : value);
   }
 
   profile_sanitize();
@@ -1873,7 +1921,7 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
 static void init(void) {
   profile_load();
   app_message_register_inbox_received(profile_inbox_received_handler);
-  app_message_open(128, 128);
+  app_message_open(256, 32);
 
   s_roboto_condensed_extrabold_font = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_EXTRABOLD_56));

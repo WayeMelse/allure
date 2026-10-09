@@ -29,9 +29,16 @@
       "Age",
       "Height",
       "Weight",
-      "StrideCustom",
+      "Units",
+      "HeightFt",
+      "HeightIn",
+      "WeightLb",
+      "StrideWalkOn",
       "StrideWalk",
-      "StrideRun"
+      "StrideWalkInch",
+      "StrideRunOn",
+      "StrideRun",
+      "StrideRunInch"
     ],
     "resources": {
       "media": [
