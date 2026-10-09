@@ -28,7 +28,10 @@
       "Sex",
       "Age",
       "Height",
-      "Weight"
+      "Weight",
+      "StrideCustom",
+      "StrideWalk",
+      "StrideRun"
     ],
     "resources": {
       "media": [

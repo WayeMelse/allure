@@ -74,6 +74,36 @@ static UserProfile s_profile = {
   .weight_kg = DEFAULT_USER_WEIGHT_KG
 };
 
+// Pas personnalise, regle sur le telephone (page Clay, section "Step length").
+// Les bornes absolues (cm) doivent rester identiques a celles de config.js.
+// Les bornes relatives (pourcentage de la taille) ne sont verifiees qu'ici,
+// car la page Clay ne connait pas la taille au moment du reglage.
+#define STRIDE_PERSIST_KEY 2
+#define STRIDE_WALK_MIN_CM 30
+#define STRIDE_WALK_MAX_CM 100
+#define STRIDE_RUN_MIN_CM 40
+#define STRIDE_RUN_MAX_CM 160
+#define STRIDE_WALK_MIN_PERCENT 25
+#define STRIDE_WALK_MAX_PERCENT 70
+#define STRIDE_RUN_MIN_PERCENT 30
+#define STRIDE_RUN_MAX_PERCENT 100
+// Pas estime a partir de la taille, en milliemes : marche 0,415 (valeur
+// usuelle), course 0,55 (provisoire, a ajuster selon les retours du terrain).
+#define STRIDE_WALK_DEFAULT_PERMILLE 415
+#define STRIDE_RUN_DEFAULT_PERMILLE 550
+
+typedef struct {
+  int16_t enabled;  // 0 = pas estime a partir de la taille
+  int16_t walk_cm;
+  int16_t run_cm;
+} StrideSettings;
+
+static StrideSettings s_stride = {
+  .enabled = 0,
+  .walk_cm = 0,
+  .run_cm = 0
+};
+
 static GFont s_roboto_condensed_extrabold_font = NULL;
 static GFont s_roboto_condensed_extrabold_countdown_font = NULL;
 static GFont s_summary_font = NULL;
@@ -350,12 +380,54 @@ static void refresh_steps_if_needed(void) {
 
 }
 
-static int get_stride_length_cm(void) {
-  if (s_selected_activity == ACTIVITY_RUN) {
-    return (s_profile.height_cm * 45) / 100;
+static int get_default_stride_cm(Activity activity) {
+  int permille = (activity == ACTIVITY_RUN)
+      ? STRIDE_RUN_DEFAULT_PERMILLE
+      : STRIDE_WALK_DEFAULT_PERMILLE;
+
+  return s_profile.height_cm * permille / 1000;
+}
+
+// Une valeur personnalisee n'est retenue que si elle est dans les bornes
+// absolues ET plausible par rapport a la taille actuelle.
+static bool is_custom_stride_valid(int cm, int min_cm, int max_cm,
+                                   int min_percent, int max_percent) {
+  if (cm < min_cm || cm > max_cm) {
+    return false;
   }
 
-  return (s_profile.height_cm * 415) / 1000;
+  return cm * 100 >= min_percent * s_profile.height_cm &&
+         cm * 100 <= max_percent * s_profile.height_cm;
+}
+
+static int get_stride_length_cm_for(Activity activity) {
+  int walk_cm = get_default_stride_cm(ACTIVITY_WALK);
+  int run_cm = get_default_stride_cm(ACTIVITY_RUN);
+
+  if (s_stride.enabled) {
+    if (is_custom_stride_valid(s_stride.walk_cm,
+                               STRIDE_WALK_MIN_CM, STRIDE_WALK_MAX_CM,
+                               STRIDE_WALK_MIN_PERCENT, STRIDE_WALK_MAX_PERCENT)) {
+      walk_cm = s_stride.walk_cm;
+    }
+
+    if (is_custom_stride_valid(s_stride.run_cm,
+                               STRIDE_RUN_MIN_CM, STRIDE_RUN_MAX_CM,
+                               STRIDE_RUN_MIN_PERCENT, STRIDE_RUN_MAX_PERCENT)) {
+      run_cm = s_stride.run_cm;
+    }
+  }
+
+  // Coherence : un pas de course n'est jamais plus court qu'un pas de marche.
+  if (run_cm < walk_cm) {
+    run_cm = walk_cm;
+  }
+
+  return (activity == ACTIVITY_RUN) ? run_cm : walk_cm;
+}
+
+static int get_stride_length_cm(void) {
+  return get_stride_length_cm_for(s_selected_activity);
 }
 
 // Distance en metres, en entier : evite tout %f (non supporte par la
@@ -1720,12 +1792,25 @@ static void profile_sanitize(void) {
   if (s_profile.weight_kg > 250) s_profile.weight_kg = 250;
 }
 
+static void stride_load(void) {
+  if (persist_exists(STRIDE_PERSIST_KEY)) {
+    persist_read_data(STRIDE_PERSIST_KEY, &s_stride, sizeof(s_stride));
+  }
+
+  s_stride.enabled = s_stride.enabled ? 1 : 0;
+}
+
+static void stride_save(void) {
+  persist_write_data(STRIDE_PERSIST_KEY, &s_stride, sizeof(s_stride));
+}
+
 static void profile_load(void) {
   if (persist_exists(PROFILE_PERSIST_KEY)) {
     persist_read_data(PROFILE_PERSIST_KEY, &s_profile, sizeof(s_profile));
   }
 
   profile_sanitize();
+  stride_load();
 }
 
 static void profile_save(void) {
@@ -1764,8 +1849,24 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     s_profile.weight_kg = (int16_t) tuple_to_int(tuple);
   }
 
+  tuple = dict_find(iter, MESSAGE_KEY_StrideCustom);
+  if (tuple) {
+    s_stride.enabled = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_StrideWalk);
+  if (tuple) {
+    s_stride.walk_cm = (int16_t) tuple_to_int(tuple);
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_StrideRun);
+  if (tuple) {
+    s_stride.run_cm = (int16_t) tuple_to_int(tuple);
+  }
+
   profile_sanitize();
   profile_save();
+  stride_save();
 
 }
 
