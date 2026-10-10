@@ -11,8 +11,13 @@ Français : [README.fr.md](README.fr.md)
 - Live heart rate. The top half of the screen changes colour with your effort
   zone (five zones, as a percentage of your estimated maximum heart rate).
 - Duration, steps, distance, pace and speed. Press the down button to switch.
-- Session summary: average and maximum heart rate, estimated calories.
-- Settings on the phone: sex, age, height and weight.
+- Effort check-in at the end of a session (relaxed to exhausting). The
+  summary background colour combines your answer with your average
+  heart-rate zone.
+- Session summary: effort, average and maximum heart rate, estimated
+  calories.
+- Settings on the phone: units (metric or imperial), sex, age, height and
+  weight, plus an optional custom step length for walking and for running.
 - The language follows the watch language: English, French, German, Spanish,
   Italian and Portuguese.
 
@@ -22,7 +27,8 @@ Français : [README.fr.md](README.fr.md)
   (206 - 0.88 x age) for women.
 - Zones: below 60 %, 60-70 %, 70-80 %, 80-90 % and 90 % or more of that maximum.
 - Calories: Keytel formula, from average heart rate, weight, age and sex.
-- Distance: steps multiplied by a stride length estimated from your height.
+- Distance: steps multiplied by a stride length (estimated from your height, or the step length you set
+  on the phone).
   There is no GPS, so distance, pace and speed are estimates.
 
 ## Requirements
@@ -45,10 +51,16 @@ Open the app in the Pebble mobile app and tap the gear icon. Values are stored
 on your phone and on your watch. Until you save them once, defaults are used
 (male, 35 years, 175 cm, 75 kg).
 
+With imperial units, height is entered in feet and inches, weight in pounds
+and step length in inches. A custom step length is switched on separately
+for walking and for running; a value that is unrealistic for your height is
+ignored.
+
 ## Status and limitations
 
 - Tested on a Pebble Time 2 and in the emulator.
-- Metric units only (kg, cm, km).
+- Distance, pace and speed are shown in kilometres or miles, depending on
+  the units setting.
 - The German, Spanish, Italian and Portuguese texts were written with
   assistance and have not been reviewed by native speakers: corrections are
   welcome.

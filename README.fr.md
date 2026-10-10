@@ -14,8 +14,13 @@ English: [README.md](README.md)
   selon la zone d'effort (cinq zones, en pourcentage de ta fréquence maximale
   estimée).
 - Durée, pas, distance, allure et vitesse. Le bouton du bas change de métrique.
-- Résumé de séance : fréquence cardiaque moyenne et maximale, calories estimées.
-- Réglages sur le téléphone : sexe, âge, taille et poids.
+- Bilan d'effort en fin de séance (de tranquille à épuisant). La couleur du
+  fond du résumé combine ta réponse et ta zone cardiaque moyenne.
+- Résumé de séance : effort, fréquence cardiaque moyenne et maximale,
+  calories estimées.
+- Réglages sur le téléphone : unités (métriques ou impériales), sexe, âge,
+  taille et poids, plus une longueur de pas facultative pour la marche et
+  pour la course.
 - La langue suit celle de la montre : anglais, français, allemand, espagnol,
   italien et portugais.
 
@@ -26,8 +31,8 @@ English: [README.md](README.md)
 - Zones : moins de 60 %, 60-70 %, 70-80 %, 80-90 % et 90 % ou plus de ce maximum.
 - Calories : formule de Keytel, à partir de la fréquence moyenne, du poids, de
   l'âge et du sexe.
-- Distance : nombre de pas multiplié par une longueur de foulée estimée d'après
-  ta taille. Il n'y a pas de GPS : distance, allure et vitesse sont des
+- Distance : nombre de pas multiplié par une longueur de foulée estimée d'après ta taille (ou réglée par toi sur le
+  téléphone). Il n'y a pas de GPS : distance, allure et vitesse sont des
   estimations.
 
 ## Prérequis
@@ -51,10 +56,16 @@ dentée. Les valeurs sont conservées sur le téléphone et sur la montre. Tant 
 tu ne les as pas enregistrées une fois, des valeurs par défaut sont utilisées
 (homme, 35 ans, 175 cm, 75 kg).
 
+En unités impériales, la taille se saisit en pieds et pouces, le poids en
+livres et la longueur de pas en pouces. Une longueur de pas personnalisée
+se règle séparément pour la marche et pour la course ; une valeur irréaliste
+par rapport à ta taille est ignorée.
+
 ## État et limites
 
 - Testée sur une Pebble Time 2 et dans l'émulateur.
-- Unités métriques uniquement (kg, cm, km).
+- Distance, allure et vitesse sont affichées en kilomètres ou en miles, selon
+  le réglage des unités.
 - Les textes allemands, espagnols, italiens et portugais ont été écrits avec
   assistance et n'ont pas été relus par des locuteurs natifs : les corrections
   sont les bienvenues.
