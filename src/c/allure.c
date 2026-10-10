@@ -441,6 +441,49 @@ static int get_distance_meters(void) {
   return (s_current_steps * stride_length_cm) / 100;
 }
 
+// Unites d'affichage : tout est calcule en metrique, seules la conversion et
+// les libelles changent en mode imperial. 1 mile = 1609,344 m.
+static const char *get_distance_unit(void) {
+  return s_stride.units_imperial ? "mi" : "km";
+}
+
+static const char *get_pace_unit(void) {
+  return s_stride.units_imperial ? "/mi" : "/km";
+}
+
+static const char *get_speed_unit(void) {
+  return s_stride.units_imperial ? "mph" : "km/h";
+}
+
+// Distance en centiemes de km ou de miles.
+static int get_distance_hundredths(int distance_meters) {
+  if (s_stride.units_imperial) {
+    return (int) (((int64_t) distance_meters * 100000) / 1609344);
+  }
+
+  return distance_meters / 10;
+}
+
+// Allure en secondes par km ou par mile (distance_meters doit etre > 0).
+static long get_pace_seconds(int distance_meters) {
+  if (s_stride.units_imperial) {
+    return (long) (((int64_t) s_elapsed_seconds * 1609344) /
+                   ((int64_t) distance_meters * 1000));
+  }
+
+  return ((long) s_elapsed_seconds * 1000) / distance_meters;
+}
+
+// Vitesse en centiemes de km/h ou de mph (s_elapsed_seconds doit etre > 0).
+static long get_speed_hundredths(int distance_meters) {
+  if (s_stride.units_imperial) {
+    return (long) (((int64_t) distance_meters * 360000000) /
+                   ((int64_t) 1609344 * s_elapsed_seconds));
+  }
+
+  return ((long) distance_meters * 360) / s_elapsed_seconds;
+}
+
 static int get_average_bpm(void) {
   if (s_bpm_sample_count == 0) {
     return 0;
@@ -619,8 +662,9 @@ static void get_metric_text(void) {
       break;
 
     case METRIC_DISTANCE: {
-      int whole_km = distance_meters / 1000;
-      int decimal_hundredths = (distance_meters % 1000) / 10;
+      int distance_hundredths = get_distance_hundredths(distance_meters);
+      int whole_km = distance_hundredths / 100;
+      int decimal_hundredths = distance_hundredths % 100;
 
       snprintf(
           s_metric_value_text,
@@ -632,7 +676,7 @@ static void get_metric_text(void) {
       snprintf(
           s_metric_unit_text,
           sizeof(s_metric_unit_text),
-          "km");
+          get_distance_unit());
 
       snprintf(
           s_metric_label_text,
@@ -673,7 +717,7 @@ static void get_metric_text(void) {
       if (distance_meters > 10) {
         // Allure en secondes par kilometre, calculee en entiers uniquement.
         long pace_seconds_per_km =
-            ((long) s_elapsed_seconds * 1000) / distance_meters;
+            get_pace_seconds(distance_meters);
 
         int pace_minutes = (int) (pace_seconds_per_km / 60);
         int pace_remaining_seconds = (int) (pace_seconds_per_km % 60);
@@ -688,7 +732,7 @@ static void get_metric_text(void) {
         snprintf(
             s_metric_unit_text,
             sizeof(s_metric_unit_text),
-            "/km");
+            get_pace_unit());
       } else {
         snprintf(
             s_metric_value_text,
@@ -698,7 +742,7 @@ static void get_metric_text(void) {
         snprintf(
             s_metric_unit_text,
             sizeof(s_metric_unit_text),
-            "/km");
+            get_pace_unit());
       }
 
       snprintf(
@@ -712,7 +756,7 @@ static void get_metric_text(void) {
       if (s_elapsed_seconds > 0) {
         // Vitesse en centiemes de km/h, calculee en entiers uniquement.
         long speed_hundredths_kmh =
-            ((long) distance_meters * 360) / s_elapsed_seconds;
+            get_speed_hundredths(distance_meters);
 
         int speed_whole = (int) (speed_hundredths_kmh / 100);
         int speed_decimal = (int) (speed_hundredths_kmh % 100) / 10;
@@ -733,7 +777,7 @@ static void get_metric_text(void) {
       snprintf(
           s_metric_unit_text,
           sizeof(s_metric_unit_text),
-          "km/h");
+          get_speed_unit());
 
       snprintf(
           s_metric_label_text,
@@ -1543,12 +1587,12 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
       distance_text,
       sizeof(distance_text),
       "%d.%02d",
-      distance_meters / 1000,
-      (distance_meters % 1000) / 10);
+      get_distance_hundredths(distance_meters) / 100,
+      get_distance_hundredths(distance_meters) % 100);
 
   if (distance_meters > 10) {
     long pace_seconds_per_km =
-        ((long) s_elapsed_seconds * 1000) / distance_meters;
+        get_pace_seconds(distance_meters);
 
     int pace_minutes = (int) (pace_seconds_per_km / 60);
     int pace_remaining_seconds = (int) (pace_seconds_per_km % 60);
@@ -1565,7 +1609,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
 
   if (s_elapsed_seconds > 0) {
     long speed_hundredths_kmh =
-        ((long) distance_meters * 360) / s_elapsed_seconds;
+        get_speed_hundredths(distance_meters);
 
     int speed_whole = (int) (speed_hundredths_kmh / 100);
     int speed_decimal = (int) (speed_hundredths_kmh % 100) / 10;
@@ -1689,13 +1733,13 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
     draw_summary_line(ctx, y, steps_text, tr(STR_UNIT_STEPS), tr(STR_LABEL_STEPS), value_font);
     y += step;
 
-    draw_summary_line(ctx, y, distance_text, "km", tr(STR_LABEL_DISTANCE), value_font);
+    draw_summary_line(ctx, y, distance_text, get_distance_unit(), tr(STR_LABEL_DISTANCE), value_font);
     y += step;
 
-    draw_summary_line(ctx, y, pace_text, "/km", tr(STR_SUMMARY_PACE), value_font);
+    draw_summary_line(ctx, y, pace_text, get_pace_unit(), tr(STR_SUMMARY_PACE), value_font);
     y += step;
 
-    draw_summary_line(ctx, y, speed_text, "km/h", tr(STR_SUMMARY_SPEED), value_font);
+    draw_summary_line(ctx, y, speed_text, get_speed_unit(), tr(STR_SUMMARY_SPEED), value_font);
     y += step;
   }
 
