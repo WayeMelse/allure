@@ -52,6 +52,16 @@ typedef enum {
 #define ACCENT_YELLOW GColorYellow
 #define SECONDARY_TEXT_COLOR GColorDukeBlue  // bleu fonce, remplace le gris (jaune et blanc)
 
+// Palette des 5 niveaux (zones cardiaques, effort, fond du resume).
+// Teintes franches : les pastel (Rajah, LavenderIndigo) se lisaient mal sur
+// l'ecran reel de la montre. Le texte est choisi selon le fond, voir
+// get_text_color_for_background() et get_label_color_for_background().
+#define COLOR_LEVEL_1 GColorPictonBlue
+#define COLOR_LEVEL_2 GColorBrightGreen
+#define COLOR_LEVEL_3 ACCENT_YELLOW
+#define COLOR_LEVEL_4 GColorOrange
+#define COLOR_LEVEL_5 GColorVividViolet
+
 // Reglage du chiffre du compte a rebours (ecran Emery 200x228)
 #define COUNTDOWN_LAYER_HEIGHT 130
 #define COUNTDOWN_Y_ADJUST 0
@@ -169,6 +179,16 @@ static int s_effort_rating = 0;
 // Defilement vertical de l'ecran de resume
 static int s_summary_scroll_offset = 0;
 static int s_summary_content_height = 0;
+
+// Couleur du texte lisible sur un fond de la palette : blanc sur le violet
+// fonce, noir partout ailleurs.
+static GColor get_text_color_for_background(GColor background) {
+  if (gcolor_equal(background, COLOR_LEVEL_5)) {
+    return GColorWhite;
+  }
+
+  return GColorBlack;
+}
 
 static void draw_pause_icon(GContext *ctx, int16_t x, int16_t y, GColor color) {
   graphics_context_set_fill_color(ctx, color);
@@ -607,11 +627,11 @@ static int get_heart_rate_zone(int bpm) {
 
 static GColor get_heart_rate_color(int bpm) {
   static const GColor zone_colors[5] = {
-    GColorPictonBlue,
-    GColorBrightGreen,
-    ACCENT_YELLOW,
-    GColorRajah,
-    GColorLavenderIndigo
+    COLOR_LEVEL_1,
+    COLOR_LEVEL_2,
+    COLOR_LEVEL_3,
+    COLOR_LEVEL_4,
+    COLOR_LEVEL_5
   };
 
   if (!s_heart_rate_available) {
@@ -826,7 +846,7 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
       GPoint(0, half_height),
       GPoint(content_width, half_height));
 
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, get_text_color_for_background(heart_rate_color));
   GSize clock_size = graphics_text_layout_get_content_size(
       s_clock_text,
       s_roboto_condensed_extrabold_font,
@@ -1283,10 +1303,10 @@ static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
       NULL);
 
   static const GColor effort_colors[4] = {
-    GColorPictonBlue,
-    GColorBrightGreen,
-    GColorRajah,
-    GColorLavenderIndigo
+    COLOR_LEVEL_1,
+    COLOR_LEVEL_2,
+    COLOR_LEVEL_4,
+    COLOR_LEVEL_5
   };
 
   for (int i = 0; i < EFFORT_ROW_COUNT; i++) {
@@ -1323,6 +1343,7 @@ static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
       if (i == 0) {
         text_color = GColorWhite;
       } else {
+        text_color = get_text_color_for_background(effort_colors[i - 1]);
         graphics_context_set_fill_color(ctx, effort_colors[i - 1]);
         graphics_fill_rect(
             ctx,
@@ -1422,10 +1443,15 @@ static void stop_confirm_window_unload(Window *window) {
 
 // Couleur du texte secondaire du resume, adaptee au fond pour rester lisible.
 static GColor s_summary_label_color;
+static GColor s_summary_value_color;
 
 static GColor get_label_color_for_background(GColor background) {
-  if (gcolor_equal(background, GColorPictonBlue) ||
-      gcolor_equal(background, GColorLavenderIndigo)) {
+  if (gcolor_equal(background, COLOR_LEVEL_5)) {
+    return GColorWhite;
+  }
+
+  if (gcolor_equal(background, COLOR_LEVEL_1) ||
+      gcolor_equal(background, COLOR_LEVEL_4)) {
     return GColorBlack;
   }
 
@@ -1442,7 +1468,7 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft);
 
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, s_summary_value_color);
   graphics_draw_text(
       ctx,
       value,
@@ -1501,16 +1527,16 @@ static GColor get_effort_color(void) {
   if (score == 0) {
     return GColorLightGray;
   } else if (score < 18) {
-    return GColorPictonBlue;
+    return COLOR_LEVEL_1;
   } else if (score < 28) {
-    return GColorBrightGreen;
+    return COLOR_LEVEL_2;
   } else if (score < 38) {
-    return ACCENT_YELLOW;
+    return COLOR_LEVEL_3;
   } else if (score < 46) {
-    return GColorRajah;
+    return COLOR_LEVEL_4;
   }
 
-  return GColorLavenderIndigo;
+  return COLOR_LEVEL_5;
 }
 
 static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
@@ -1520,6 +1546,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
       ? ACCENT_YELLOW
       : get_effort_color();
   s_summary_label_color = get_label_color_for_background(background);
+  s_summary_value_color = get_text_color_for_background(background);
   graphics_context_set_fill_color(ctx, background);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
@@ -1655,7 +1682,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
     title_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   }
 
-  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_context_set_text_color(ctx, s_summary_value_color);
   graphics_draw_text(
       ctx,
       title,
