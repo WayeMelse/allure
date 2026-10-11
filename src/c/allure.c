@@ -130,6 +130,7 @@ static StrideSettings s_stride = {
 typedef struct {
   int16_t use_12h;    // 0 = 24 h, 1 = 12 h
   int16_t show_ampm;  // 1 = afficher AM/PM (12 h seulement)
+  int16_t hide_hour_zero;  // 1 = pas de zero devant l'heure (24 h)
 } ClockSettings;
 
 static ClockSettings s_clock = { .use_12h = 0, .show_ampm = 1 };
@@ -378,7 +379,11 @@ static void update_clock_text(void) {
     }
     snprintf(s_clock_text, sizeof(s_clock_text), "%d:%02d", hour, minute);
   } else {
-    snprintf(s_clock_text, sizeof(s_clock_text), "%02d:%02d", hour, minute);
+    if (s_clock.hide_hour_zero) {
+      snprintf(s_clock_text, sizeof(s_clock_text), "%d:%02d", hour, minute);
+    } else {
+      snprintf(s_clock_text, sizeof(s_clock_text), "%02d:%02d", hour, minute);
+    }
   }
 }
 
@@ -2048,6 +2053,7 @@ static void clock_load(void) {
 
   s_clock.use_12h = s_clock.use_12h ? 1 : 0;
   s_clock.show_ampm = s_clock.show_ampm ? 1 : 0;
+  s_clock.hide_hour_zero = s_clock.hide_hour_zero ? 1 : 0;
 }
 
 static void clock_save(void) {
@@ -2171,6 +2177,11 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
   tuple = dict_find(iter, MESSAGE_KEY_ShowAmPm);
   if (tuple) {
     s_clock.show_ampm = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_HideHourZero);
+  if (tuple) {
+    s_clock.hide_hour_zero = (tuple_to_int(tuple) == 1) ? 1 : 0;
   }
 
   tuple = dict_find(iter, MESSAGE_KEY_VibrateKm);

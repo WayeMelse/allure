@@ -54,12 +54,12 @@ var TEXTS = {
 };
 
 var CLOCK_TEXTS = {
-  en: { clock: 'Clock', clock12: 'Use 12-hour clock', ampm: 'Show AM/PM' },
-  fr: { clock: 'Horloge', clock12: 'Horloge 12 heures', ampm: 'Afficher AM/PM' },
-  de: { clock: 'Uhr', clock12: '12-Stunden-Format verwenden', ampm: 'AM/PM anzeigen' },
-  es: { clock: 'Reloj', clock12: 'Usar reloj de 12 horas', ampm: 'Mostrar AM/PM' },
-  it: { clock: 'Orologio', clock12: 'Usa il formato a 12 ore', ampm: 'Mostra AM/PM' },
-  pt: { clock: 'Rel\u00f3gio', clock12: 'Usar rel\u00f3gio de 12 horas', ampm: 'Mostrar AM/PM' }
+  en: { clock: 'Clock', clock12: 'Use 12-hour clock', ampm: 'Show AM/PM', hideZero: 'Hide the leading zero in the hour' },
+  fr: { clock: 'Horloge', clock12: 'Horloge 12 heures', ampm: 'Afficher AM/PM', hideZero: 'Masquer le z\u00e9ro devant l\u2019heure' },
+  de: { clock: 'Uhr', clock12: '12-Stunden-Format verwenden', ampm: 'AM/PM anzeigen', hideZero: 'F\u00fchrende Null bei der Stunde ausblenden' },
+  es: { clock: 'Reloj', clock12: 'Usar reloj de 12 horas', ampm: 'Mostrar AM/PM', hideZero: 'Ocultar el cero inicial de la hora' },
+  it: { clock: 'Orologio', clock12: 'Usa il formato a 12 ore', ampm: 'Mostra AM/PM', hideZero: 'Nascondi lo zero iniziale dell\u2019ora' },
+  pt: { clock: 'Rel\u00f3gio', clock12: 'Usar rel\u00f3gio de 12 horas', ampm: 'Mostrar AM/PM', hideZero: 'Ocultar o zero inicial da hora' }
 };
 var tc = CLOCK_TEXTS[language] || CLOCK_TEXTS.en;
 var t = TEXTS[language] || TEXTS.en;
@@ -107,7 +107,9 @@ module.exports = [
       { "type": "toggle", "messageKey": "Clock12h", "label": tc.clock12,
         "defaultValue": false },
       { "type": "toggle", "messageKey": "ShowAmPm", "label": tc.ampm,
-        "defaultValue": true }
+        "defaultValue": true },
+      { "type": "toggle", "messageKey": "HideHourZero", "label": tc.hideZero,
+        "defaultValue": false }
     ]
   },
   {

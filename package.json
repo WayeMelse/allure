@@ -41,6 +41,7 @@
       "StrideRunInch",
       "Clock12h",
       "ShowAmPm",
+      "HideHourZero",
       "VibrateKm",
       "VibrateZone",
       "SoundKm",

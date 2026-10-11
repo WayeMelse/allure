@@ -36,6 +36,7 @@ module.exports = function () {
     setVisible(['StrideRun'], runOn && !imperial);
     setVisible(['StrideRunInch'], runOn && imperial);
     setVisible(['ShowAmPm'], !!item('Clock12h').get());
+    setVisible(['HideHourZero'], !item('Clock12h').get());
   }
 
   function toImperial() {
