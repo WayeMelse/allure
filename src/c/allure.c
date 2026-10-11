@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include "i18n.h"
 #include "steps.h"
+#include "achievements.h"
+#include "journal.h"
 
 typedef enum {
   ACTIVITY_WALK = 0,
@@ -210,6 +212,13 @@ static int get_raw_heart_rate_zone(int bpm);
 // s_effort_rating : niveau valide (0 = pas de reponse, 1 a 4).
 static int s_effort_choice = 0;
 static int s_effort_rating = 0;
+
+// Suivi de la seance pour le journal (voir journal.h).
+static JournalSession s_journal;
+static time_t s_session_start_time = 0;
+static int s_session_start_hour = 0;
+static int s_session_start_day = 0;
+static int s_zone_run_seconds = 0;  // duree consecutive en zone 4 ou 5
 
 // Defilement vertical de l'ecran de resume
 static int s_summary_scroll_offset = 0;
@@ -1061,6 +1070,22 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
       NULL);
 }
 
+// Debut effectif de la seance : l'heure est prise une seule fois ici, puis
+// reutilisee pour la frise, les succes et le tableau des 7 jours.
+static void journal_session_begin(void) {
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+
+  memset(&s_journal, 0, sizeof(s_journal));
+  s_journal.activity = (uint8_t) s_selected_activity;
+  s_journal.start_time = (uint32_t) now;
+  s_session_start_time = now;
+  s_session_start_hour = t->tm_hour;
+  s_session_start_day = journal_day_number(
+      t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+  s_zone_run_seconds = 0;
+}
+
 static void alerts_reset(void) {
   s_alert_km_done = 0;
   s_alert_zone = -1;
@@ -1159,6 +1184,7 @@ static void countdown_timer_handler(void *context) {
 
   s_countdown_timer = NULL;
   s_elapsed_seconds = 0;
+  journal_session_begin();
   s_current_metric = METRIC_DURATION;
 
   // Vibration courte pour signaler le debut effectif du workout,
