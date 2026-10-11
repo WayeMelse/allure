@@ -12,6 +12,7 @@ Allure est une application de suivi d'activité inspirée de l'application offic
 * En fin de séance : indique ton effort, de tranquille à épuisant.
 * Résumé de séance : effort, moyenne et maximum bpm, calories estimées. La couleur du résumé suit ton effort.
 * Unités métriques ou impériales (km, mi, kg, lb), au choix sur le téléphone.
+* Horloge 12 heures en option, avec ou sans AM/PM, au choix sur le téléphone.
 * Zones et calories adaptées à l'âge, au sexe, à la taille et au poids (réglages sur le téléphone).
 * Longueur de pas personnalisable pour la marche et la course, pour une distance plus juste.
 * Gros chiffres pour une lecture en mouvement.

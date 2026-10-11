@@ -18,9 +18,9 @@ English: [README.md](README.md)
   fond du résumé combine ta réponse et ta zone cardiaque moyenne.
 - Résumé de séance : effort, fréquence cardiaque moyenne et maximale,
   calories estimées.
-- Réglages sur le téléphone : unités (métriques ou impériales), sexe, âge,
-  taille et poids, plus une longueur de pas facultative pour la marche et
-  pour la course.
+- Réglages sur le téléphone : unités (métriques ou impériales), horloge
+  12 heures avec AM/PM facultatif, sexe, âge, taille et poids, plus une
+  longueur de pas facultative pour la marche et pour la course.
 - La langue suit celle de la montre : anglais, français, allemand, espagnol,
   italien et portugais.
 
@@ -60,6 +60,10 @@ En unités impériales, la taille se saisit en pieds et pouces, le poids en
 livres et la longueur de pas en pouces. Une longueur de pas personnalisée
 se règle séparément pour la marche et pour la course ; une valeur irréaliste
 par rapport à ta taille est ignorée.
+
+L'horloge affiche l'heure en 24 heures par défaut. Active l'horloge 12 heures
+pour afficher, par exemple, 7:14 au lieu de 07:14, avec un petit AM ou PM
+facultatif sous l'heure.
 
 ## État et limites
 

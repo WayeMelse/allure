@@ -14,6 +14,7 @@ Allure is an activity tracker for the Pebble Time 2 that turns your heart rate i
 * End of session: rate your effort, from relaxed to exhausting.
 * Session summary: effort, average and maximum heart rate, estimated calories. The summary color follows your effort.
 * Metric or imperial units (km, mi, kg, lb), chosen on your phone.
+* Optional 12-hour clock, with or without AM/PM, chosen on your phone.
 * Zones and calories adapt to your age, sex, height and weight, all set from the settings page on your phone.
 * Optional custom step length for walking and running, for a more accurate distance.
 * Available in English, French, German, Spanish, Italian and Portuguese.

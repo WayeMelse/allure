@@ -16,8 +16,9 @@ Français : [README.fr.md](README.fr.md)
   heart-rate zone.
 - Session summary: effort, average and maximum heart rate, estimated
   calories.
-- Settings on the phone: units (metric or imperial), sex, age, height and
-  weight, plus an optional custom step length for walking and for running.
+- Settings on the phone: units (metric or imperial), 12-hour clock with
+  optional AM/PM, sex, age, height and weight, plus an optional custom step
+  length for walking and for running.
 - The language follows the watch language: English, French, German, Spanish,
   Italian and Portuguese.
 
@@ -55,6 +56,10 @@ With imperial units, height is entered in feet and inches, weight in pounds
 and step length in inches. A custom step length is switched on separately
 for walking and for running; a value that is unrealistic for your height is
 ignored.
+
+The clock shows 24-hour time by default. Switch on the 12-hour clock to show,
+for example, 7:14 instead of 07:14, with an optional small AM or PM under the
+time.
 
 ## Status and limitations
 
