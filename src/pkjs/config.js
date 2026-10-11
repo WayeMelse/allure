@@ -53,6 +53,15 @@ var TEXTS = {
   }
 };
 
+var CLOCK_TEXTS = {
+  en: { clock: 'Clock', clock12: 'Use 12-hour clock', ampm: 'Show AM/PM' },
+  fr: { clock: 'Horloge', clock12: 'Horloge 12 heures', ampm: 'Afficher AM/PM' },
+  de: { clock: 'Uhr', clock12: '12-Stunden-Format verwenden', ampm: 'AM/PM anzeigen' },
+  es: { clock: 'Reloj', clock12: 'Usar reloj de 12 horas', ampm: 'Mostrar AM/PM' },
+  it: { clock: 'Orologio', clock12: 'Usa il formato a 12 ore', ampm: 'Mostra AM/PM' },
+  pt: { clock: 'Rel\u00f3gio', clock12: 'Usar rel\u00f3gio de 12 horas', ampm: 'Mostrar AM/PM' }
+};
+var tc = CLOCK_TEXTS[language] || CLOCK_TEXTS.en;
 var t = TEXTS[language] || TEXTS.en;
 
 // Libelles imperiaux deduits des libelles metriques deja traduits.
@@ -79,6 +88,16 @@ module.exports = [
           { "label": t.imperial, "value": "1" }
         ]
       }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": tc.clock },
+      { "type": "toggle", "messageKey": "Clock12h", "label": tc.clock12,
+        "defaultValue": false },
+      { "type": "toggle", "messageKey": "ShowAmPm", "label": tc.ampm,
+        "defaultValue": true }
     ]
   },
   {

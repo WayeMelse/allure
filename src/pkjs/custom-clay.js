@@ -35,6 +35,7 @@ module.exports = function () {
     setVisible(['StrideWalkInch'], walkOn && imperial);
     setVisible(['StrideRun'], runOn && !imperial);
     setVisible(['StrideRunInch'], runOn && imperial);
+    setVisible(['ShowAmPm'], !!item('Clock12h').get());
   }
 
   function toImperial() {
@@ -73,5 +74,6 @@ module.exports = function () {
 
     item('StrideWalkOn').on('change', refresh);
     item('StrideRunOn').on('change', refresh);
+    item('Clock12h').on('change', refresh);
   });
 };

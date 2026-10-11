@@ -38,13 +38,21 @@
       "StrideWalkInch",
       "StrideRunOn",
       "StrideRun",
-      "StrideRunInch"
+      "StrideRunInch",
+      "Clock12h",
+      "ShowAmPm"
     ],
     "resources": {
       "media": [
         {
           "type": "font",
           "name": "FONT_ROBOTO_CONDENSED_EXTRABOLD_56",
+          "file": "fonts/robotocondensed-extrabold.ttf",
+          "characterRegex": "[0-9: ]"
+        },
+        {
+          "type": "font",
+          "name": "FONT_ROBOTO_CONDENSED_EXTRABOLD_64",
           "file": "fonts/robotocondensed-extrabold.ttf",
           "characterRegex": "[0-9: ]"
         },

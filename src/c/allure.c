@@ -118,6 +118,20 @@ static StrideSettings s_stride = {
   .run_cm = 0
 };
 
+// Horloge : format 12 h et AM/PM, regles sur le telephone (cle 4).
+// OFFSET : decalage du AM/PM par rapport au coin bas droit de l'heure.
+#define CLOCK_PERSIST_KEY 4
+#define CLOCK_AMPM_OFFSET_X 18
+#define CLOCK_AMPM_OFFSET_Y 24
+
+typedef struct {
+  int16_t use_12h;    // 0 = 24 h, 1 = 12 h
+  int16_t show_ampm;  // 1 = afficher AM/PM (12 h seulement)
+} ClockSettings;
+
+static ClockSettings s_clock = { .use_12h = 0, .show_ampm = 1 };
+static GFont s_clock_font = NULL;
+
 static GFont s_roboto_condensed_extrabold_font = NULL;
 static GFont s_roboto_condensed_extrabold_countdown_font = NULL;
 static GFont s_summary_font = NULL;
@@ -149,7 +163,8 @@ static bool s_stay_awake = false;
 static AppTimer *s_countdown_timer;
 
 static char s_countdown_text[4];
-static char s_clock_text[6];
+static char s_clock_text[16];
+static char s_clock_suffix_text[8];
 static char s_metric_value_text[24];
 static char s_metric_unit_text[12];
 static char s_metric_label_text[24];
@@ -328,11 +343,24 @@ static void update_clock_text(void) {
   time_t now = time(NULL);
   struct tm *current_time = localtime(&now);
 
-  strftime(
-      s_clock_text,
-      sizeof(s_clock_text),
-      "%H:%M",
-      current_time);
+  int hour = current_time->tm_hour;
+  int minute = current_time->tm_min;
+
+  s_clock_suffix_text[0] = '\0';
+
+  if (s_clock.use_12h) {
+    if (s_clock.show_ampm) {
+      snprintf(s_clock_suffix_text, sizeof(s_clock_suffix_text),
+               "%s", (hour < 12) ? "AM" : "PM");
+    }
+    hour = hour % 12;
+    if (hour == 0) {
+      hour = 12;
+    }
+    snprintf(s_clock_text, sizeof(s_clock_text), "%d:%02d", hour, minute);
+  } else {
+    snprintf(s_clock_text, sizeof(s_clock_text), "%02d:%02d", hour, minute);
+  }
 }
 
 static void refresh_heart_rate_if_needed(void) {
@@ -847,9 +875,10 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
       GPoint(content_width, half_height));
 
   graphics_context_set_text_color(ctx, get_text_color_for_background(heart_rate_color));
+  GFont clock_font = s_clock_font;
   GSize clock_size = graphics_text_layout_get_content_size(
       s_clock_text,
-      s_roboto_condensed_extrabold_font,
+      clock_font,
       GRect(0, 0, content_width, half_height),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentCenter);
@@ -860,11 +889,32 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
   graphics_draw_text(
       ctx,
       s_clock_text,
-      s_roboto_condensed_extrabold_font,
+      clock_font,
       GRect(0, clock_y, content_width, clock_size.h),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentCenter,
       NULL);
+
+  if (s_clock_suffix_text[0] != '\0') {
+    GFont suffix_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    GSize suffix_size = graphics_text_layout_get_content_size(
+        s_clock_suffix_text, suffix_font, GRect(0, 0, 60, 24),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    // Position fixe, calee sur une heure a 3 chiffres (1 h a 9 h) : le
+    // AM/PM ne bouge pas et ne deborde pas de 10 h a 12 h.
+    GSize ref_size = graphics_text_layout_get_content_size(
+        "8:88", clock_font, GRect(0, 0, 400, half_height),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter);
+    int16_t suffix_x = (content_width + ref_size.w) / 2 -
+                       suffix_size.w + CLOCK_AMPM_OFFSET_X;
+    int16_t suffix_y = clock_y + clock_size.h -
+                       suffix_size.h + CLOCK_AMPM_OFFSET_Y;
+
+    graphics_draw_text(
+        ctx, s_clock_suffix_text, suffix_font,
+        GRect(suffix_x, suffix_y, suffix_size.w + 4, suffix_size.h),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  }
 
   bool heart_rate_unavailable =
       (s_current_metric == METRIC_HEART_RATE && !s_heart_rate_available);
@@ -1891,6 +1941,19 @@ static void stride_save(void) {
   persist_write_data(STRIDE_PERSIST_KEY, &s_stride, sizeof(s_stride));
 }
 
+static void clock_load(void) {
+  if (persist_exists(CLOCK_PERSIST_KEY)) {
+    persist_read_data(CLOCK_PERSIST_KEY, &s_clock, sizeof(s_clock));
+  }
+
+  s_clock.use_12h = s_clock.use_12h ? 1 : 0;
+  s_clock.show_ampm = s_clock.show_ampm ? 1 : 0;
+}
+
+static void clock_save(void) {
+  persist_write_data(CLOCK_PERSIST_KEY, &s_clock, sizeof(s_clock));
+}
+
 static void profile_load(void) {
   if (persist_exists(PROFILE_PERSIST_KEY)) {
     persist_read_data(PROFILE_PERSIST_KEY, &s_profile, sizeof(s_profile));
@@ -1898,6 +1961,7 @@ static void profile_load(void) {
 
   profile_sanitize();
   stride_load();
+  clock_load();
 }
 
 static void profile_save(void) {
@@ -1983,6 +2047,18 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     s_stride.run_cm = (int16_t) (imperial ? inches_to_cm(value) : value);
   }
 
+  tuple = dict_find(iter, MESSAGE_KEY_Clock12h);
+  if (tuple) {
+    s_clock.use_12h = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_ShowAmPm);
+  if (tuple) {
+    s_clock.show_ampm = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  clock_save();
+
   profile_sanitize();
   profile_save();
   stride_save();
@@ -1999,6 +2075,9 @@ static void init(void) {
 
   s_roboto_condensed_extrabold_countdown_font = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_EXTRABOLD_100));
+
+  s_clock_font = fonts_load_custom_font(
+      resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_EXTRABOLD_64));
 
   s_summary_font = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_EXTRABOLD_34));
@@ -2077,6 +2156,7 @@ static void deinit(void) {
 
   fonts_unload_custom_font(s_roboto_condensed_extrabold_font);
   fonts_unload_custom_font(s_roboto_condensed_extrabold_countdown_font);
+  fonts_unload_custom_font(s_clock_font);
   fonts_unload_custom_font(s_summary_font);
   fonts_unload_custom_font(s_emoji_font);
 }
