@@ -64,6 +64,16 @@ var CLOCK_TEXTS = {
 var tc = CLOCK_TEXTS[language] || CLOCK_TEXTS.en;
 var t = TEXTS[language] || TEXTS.en;
 
+var ALERT_TEXTS = {
+  en: { title: 'Alerts', vibKm: 'Vibrate at each km or mile', vibZone: 'Vibrate when the heart-rate zone changes', sndKm: 'Beep at each km or mile', sndZone: 'Beep when the heart-rate zone changes', hint: 'Zone alerts wait at least 20 seconds between two alerts. No sound if the watch is muted or in Quiet Time.' },
+  fr: { title: 'Alertes', vibKm: 'Vibrer \u00e0 chaque km ou mile', vibZone: 'Vibrer quand la zone cardiaque change', sndKm: 'Bip \u00e0 chaque km ou mile', sndZone: 'Bip quand la zone cardiaque change', hint: 'Les alertes de zone attendent au moins 20 secondes entre deux alertes. Pas de son si la montre est en sourdine.' },
+  de: { title: 'Hinweise', vibKm: 'Vibrieren bei jedem km oder jeder Meile', vibZone: 'Vibrieren bei Wechsel der Herzfrequenzzone', sndKm: 'Signalton bei jedem km oder jeder Meile', sndZone: 'Signalton bei Wechsel der Herzfrequenzzone', hint: 'Zonenhinweise warten mindestens 20 Sekunden. Kein Ton, wenn die Uhr stummgeschaltet ist.' },
+  es: { title: 'Avisos', vibKm: 'Vibrar en cada km o milla', vibZone: 'Vibrar al cambiar la zona card\u00edaca', sndKm: 'Pitido en cada km o milla', sndZone: 'Pitido al cambiar la zona card\u00edaca', hint: 'Los avisos de zona esperan al menos 20 segundos. Sin sonido si el reloj est\u00e1 silenciado.' },
+  it: { title: 'Avvisi', vibKm: 'Vibra a ogni km o miglio', vibZone: 'Vibra al cambio di zona cardiaca', sndKm: 'Segnale acustico a ogni km o miglio', sndZone: 'Segnale acustico al cambio di zona cardiaca', hint: 'Gli avvisi di zona attendono almeno 20 secondi. Nessun suono se l\u2019orologio \u00e8 silenzioso.' },
+  pt: { title: 'Alertas', vibKm: 'Vibrar a cada km ou milha', vibZone: 'Vibrar quando a zona card\u00edaca muda', sndKm: 'Sinal sonoro a cada km ou milha', sndZone: 'Sinal sonoro quando a zona card\u00edaca muda', hint: 'Os alertas de zona esperam pelo menos 20 segundos. Sem som se o rel\u00f3gio estiver silenciado.' }
+};
+var ta = ALERT_TEXTS[language] || ALERT_TEXTS.en;
+
 // Libelles imperiaux deduits des libelles metriques deja traduits.
 var heightFt = t.height.replace('(cm)', '(ft)');
 var heightIn = t.height.replace('(cm)', '(in)');
@@ -98,6 +108,21 @@ module.exports = [
         "defaultValue": false },
       { "type": "toggle", "messageKey": "ShowAmPm", "label": tc.ampm,
         "defaultValue": true }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": ta.title },
+      { "type": "toggle", "messageKey": "VibrateKm", "label": ta.vibKm,
+        "defaultValue": false },
+      { "type": "toggle", "messageKey": "VibrateZone", "label": ta.vibZone,
+        "defaultValue": false },
+      { "type": "toggle", "messageKey": "SoundKm", "label": ta.sndKm,
+        "defaultValue": false },
+      { "type": "toggle", "messageKey": "SoundZone", "label": ta.sndZone,
+        "defaultValue": false },
+      { "type": "text", "defaultValue": ta.hint }
     ]
   },
   {

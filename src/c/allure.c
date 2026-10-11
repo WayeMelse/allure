@@ -135,6 +135,22 @@ typedef struct {
 static ClockSettings s_clock = { .use_12h = 0, .show_ampm = 1 };
 static GFont s_clock_font = NULL;
 
+// Alertes (vibration et son), reglees sur le telephone (cle 5).
+#define ALERT_PERSIST_KEY 5
+#define ALERT_ZONE_MIN_GAP_SECONDS 20
+
+typedef struct {
+  int16_t vibrate_km;    // 1 = vibrer a chaque km ou mile
+  int16_t vibrate_zone;  // 1 = vibrer au changement de zone de FC
+  int16_t sound_km;      // 1 = bip a chaque km ou mile
+  int16_t sound_zone;    // 1 = bip au changement de zone de FC
+} AlertSettings;
+
+static AlertSettings s_alerts = { 0, 0, 0, 0 };
+static int s_alert_km_done = 0;
+static int s_alert_zone = -1;
+static int s_alert_zone_second = 0;
+
 static GFont s_roboto_condensed_extrabold_font = NULL;
 static GFont s_roboto_condensed_extrabold_countdown_font = NULL;
 static GFont s_summary_font = NULL;
@@ -616,9 +632,9 @@ static int get_max_heart_rate(void) {
 static int s_heart_rate_zone = -1;
 
 // Seuils superieurs des zones 1 a 4, en pourcentage de la FC maximale.
-// Marche : paliers plus bas et plus larges (ecart de 12 points).
+// Marche : vert des 53 %, puis paliers reguliers (11 points) jusqu'a 86 %.
 static const int s_zone_percents[ACTIVITY_COUNT][4] = {
-  [ACTIVITY_WALK]     = {50, 62, 74, 86},
+  [ACTIVITY_WALK]     = {53, 64, 75, 86},
   [ACTIVITY_RUN]      = {60, 70, 80, 90},
   [ACTIVITY_TRAINING] = {60, 70, 80, 90}
 };
@@ -1040,12 +1056,81 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
       NULL);
 }
 
+static void alerts_reset(void) {
+  s_alert_km_done = 0;
+  s_alert_zone = -1;
+  s_alert_zone_second = -ALERT_ZONE_MIN_GAP_SECONDS;
+}
+
+#define ALERT_TONE_VOLUME 90
+
+// Kilometre : deux notes montantes (sol puis do aigu). Zone : un bip court a 1000 Hz.
+static const SpeakerNote s_alert_km_notes[] = {
+  { .midi_note = 79, .waveform = SpeakerWaveformSine, .duration_ms = 150 },
+  { .midi_note = 84, .waveform = SpeakerWaveformSine, .duration_ms = 250 }
+};
+
+static void alert_play_sound(bool is_km) {
+  if (is_km) {
+    speaker_play_notes(s_alert_km_notes, 2, ALERT_TONE_VOLUME);
+  } else {
+    speaker_play_tone(1000, 250, ALERT_TONE_VOLUME, SpeakerWaveformSine);
+  }
+}
+
+static void alert_fire(bool vibrate, bool sound, bool is_km) {
+  if (vibrate) {
+    if (is_km) {
+      vibes_double_pulse();
+    } else {
+      vibes_short_pulse();
+    }
+  }
+
+  if (sound) {
+    alert_play_sound(is_km);
+  }
+}
+
+static void check_alerts(void) {
+  if (s_selected_activity != ACTIVITY_TRAINING &&
+      (s_alerts.vibrate_km || s_alerts.sound_km)) {
+    int unit_count = get_distance_hundredths(get_distance_meters()) / 100;
+
+    if (unit_count > s_alert_km_done) {
+      s_alert_km_done = unit_count;
+      alert_fire(s_alerts.vibrate_km, s_alerts.sound_km, true);
+    }
+  }
+
+  if (!(s_alerts.vibrate_zone || s_alerts.sound_zone) ||
+      !s_heart_rate_available) {
+    return;
+  }
+
+  int zone = get_heart_rate_zone(s_current_bpm);
+
+  if (s_alert_zone < 0) {
+    s_alert_zone = zone;
+    return;
+  }
+
+  if (zone != s_alert_zone &&
+      s_elapsed_seconds - s_alert_zone_second >=
+          ALERT_ZONE_MIN_GAP_SECONDS) {
+    s_alert_zone = zone;
+    s_alert_zone_second = s_elapsed_seconds;
+    alert_fire(s_alerts.vibrate_zone, s_alerts.sound_zone, false);
+  }
+}
+
 static void workout_tick_handler(struct tm *tick_time,
                                  TimeUnits units_changed) {
   if (!s_is_paused) {
     s_elapsed_seconds++;
     refresh_heart_rate_if_needed();
     refresh_steps_if_needed();
+    check_alerts();
   }
 
   if (s_workout_layer != NULL) {
@@ -1268,6 +1353,7 @@ static void workout_window_load(Window *window) {
   s_heart_rate_available = false;
   s_heart_rate_zone = -1;
   s_seconds_since_last_bpm_read = 0;
+  alerts_reset();
   s_current_steps = 0;
   s_seconds_since_last_steps_read = 0;
 
@@ -1968,6 +2054,21 @@ static void clock_save(void) {
   persist_write_data(CLOCK_PERSIST_KEY, &s_clock, sizeof(s_clock));
 }
 
+static void alerts_load(void) {
+  if (persist_exists(ALERT_PERSIST_KEY)) {
+    persist_read_data(ALERT_PERSIST_KEY, &s_alerts, sizeof(s_alerts));
+  }
+
+  s_alerts.vibrate_km = s_alerts.vibrate_km ? 1 : 0;
+  s_alerts.vibrate_zone = s_alerts.vibrate_zone ? 1 : 0;
+  s_alerts.sound_km = s_alerts.sound_km ? 1 : 0;
+  s_alerts.sound_zone = s_alerts.sound_zone ? 1 : 0;
+}
+
+static void alerts_save(void) {
+  persist_write_data(ALERT_PERSIST_KEY, &s_alerts, sizeof(s_alerts));
+}
+
 static void profile_load(void) {
   if (persist_exists(PROFILE_PERSIST_KEY)) {
     persist_read_data(PROFILE_PERSIST_KEY, &s_profile, sizeof(s_profile));
@@ -1976,6 +2077,7 @@ static void profile_load(void) {
   profile_sanitize();
   stride_load();
   clock_load();
+  alerts_load();
 }
 
 static void profile_save(void) {
@@ -2071,6 +2173,27 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     s_clock.show_ampm = (tuple_to_int(tuple) == 1) ? 1 : 0;
   }
 
+  tuple = dict_find(iter, MESSAGE_KEY_VibrateKm);
+  if (tuple) {
+    s_alerts.vibrate_km = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_VibrateZone);
+  if (tuple) {
+    s_alerts.vibrate_zone = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_SoundKm);
+  if (tuple) {
+    s_alerts.sound_km = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_SoundZone);
+  if (tuple) {
+    s_alerts.sound_zone = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  alerts_save();
   clock_save();
 
   profile_sanitize();
@@ -2082,7 +2205,7 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
 static void init(void) {
   profile_load();
   app_message_register_inbox_received(profile_inbox_received_handler);
-  app_message_open(256, 32);
+  app_message_open(384, 32);
 
   s_roboto_condensed_extrabold_font = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_EXTRABOLD_56));

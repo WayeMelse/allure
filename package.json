@@ -40,7 +40,11 @@
       "StrideRun",
       "StrideRunInch",
       "Clock12h",
-      "ShowAmPm"
+      "ShowAmPm",
+      "VibrateKm",
+      "VibrateZone",
+      "SoundKm",
+      "SoundZone"
     ],
     "resources": {
       "media": [
