@@ -27,7 +27,7 @@ Français : [README.fr.md](README.fr.md)
 - Maximum heart rate: Tanaka formula (208 - 0.7 x age) for men, Gulati formula
   (206 - 0.88 x age) for women.
 - Zones (run and workout): below 60 %, 60-70 %, 70-80 %, 80-90 % and 90 % or
-  more of that maximum. Walking uses lower limits (50, 60, 70 and 80 %),
+  more of that maximum. Walking uses lower limits (50, 62, 74 and 86 %),
   because a brisk walk stays well below the effort of a run.
 - Calories: Keytel formula, from average heart rate, weight, age and sex.
 - Distance: steps multiplied by a stride length (estimated from your height, or the step length you set

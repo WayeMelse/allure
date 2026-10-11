@@ -616,9 +616,9 @@ static int get_max_heart_rate(void) {
 static int s_heart_rate_zone = -1;
 
 // Seuils superieurs des zones 1 a 4, en pourcentage de la FC maximale.
-// Marche : decales d'un cran, car une marche rapide reste souvent sous 70 %.
+// Marche : paliers plus bas et plus larges (ecart de 12 points).
 static const int s_zone_percents[ACTIVITY_COUNT][4] = {
-  [ACTIVITY_WALK]     = {50, 60, 70, 80},
+  [ACTIVITY_WALK]     = {50, 62, 74, 86},
   [ACTIVITY_RUN]      = {60, 70, 80, 90},
   [ACTIVITY_TRAINING] = {60, 70, 80, 90}
 };
