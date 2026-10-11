@@ -65,7 +65,8 @@ ignored.
 
 The clock shows 24-hour time by default. Switch on the 12-hour clock to show,
 for example, 7:14 instead of 07:14, with an optional small AM or PM under the
-time.
+time. In 24-hour mode, you can also hide the leading zero of the hour
+to show 8:05 instead of 08:05.
 
 ## Status and limitations
 

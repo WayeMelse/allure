@@ -70,7 +70,8 @@ par rapport à ta taille est ignorée.
 
 L'horloge affiche l'heure en 24 heures par défaut. Active l'horloge 12 heures
 pour afficher, par exemple, 7:14 au lieu de 07:14, avec un petit AM ou PM
-facultatif sous l'heure.
+facultatif sous l'heure. En 24 heures, tu peux aussi masquer le zéro devant
+l'heure pour afficher 8:05 au lieu de 08:05.
 
 ## État et limites
 
