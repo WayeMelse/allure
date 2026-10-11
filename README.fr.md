@@ -28,7 +28,9 @@ English: [README.md](README.md)
 
 - Fréquence maximale : formule de Tanaka (208 - 0,7 x âge) pour les hommes,
   formule de Gulati (206 - 0,88 x âge) pour les femmes.
-- Zones : moins de 60 %, 60-70 %, 70-80 %, 80-90 % et 90 % ou plus de ce maximum.
+- Zones (course et entraînement) : moins de 60 %, 60-70 %, 70-80 %, 80-90 % et
+  90 % ou plus de ce maximum. La marche utilise des limites plus basses (50, 60,
+  70 et 80 %), car une marche rapide reste loin de l'effort d'une course.
 - Calories : formule de Keytel, à partir de la fréquence moyenne, du poids, de
   l'âge et du sexe.
 - Distance : nombre de pas multiplié par une longueur de foulée estimée d'après ta taille (ou réglée par toi sur le

@@ -602,7 +602,8 @@ static int get_max_heart_rate(void) {
   return 206 - (88 * s_profile.age_years + 50) / 100;
 }
 
-// 5 zones d'effort, en pourcentage de la FC maximale :
+// 5 zones d'effort, en pourcentage de la FC maximale (course et
+// entrainement ; la marche est decalee d'un cran, voir s_zone_percents) :
 //   Zone 1 : moins de 60 %  (tres leger)              -> bleu
 //   Zone 2 : 60 a 70 %      (endurance de base)       -> vert
 //   Zone 3 : 70 a 80 %      (aerobie / tempo)         -> jaune
@@ -614,9 +615,16 @@ static int get_max_heart_rate(void) {
 
 static int s_heart_rate_zone = -1;
 
+// Seuils superieurs des zones 1 a 4, en pourcentage de la FC maximale.
+// Marche : decales d'un cran, car une marche rapide reste souvent sous 70 %.
+static const int s_zone_percents[ACTIVITY_COUNT][4] = {
+  [ACTIVITY_WALK]     = {50, 60, 70, 80},
+  [ACTIVITY_RUN]      = {60, 70, 80, 90},
+  [ACTIVITY_TRAINING] = {60, 70, 80, 90}
+};
+
 static int get_zone_upper_limit_bpm(int zone, int max_bpm) {
-  static const int percents[4] = {60, 70, 80, 90};
-  return (max_bpm * percents[zone]) / 100;
+  return (max_bpm * s_zone_percents[s_selected_activity][zone]) / 100;
 }
 
 // Zone brute (0 a 4) sans hysteresis, pour les statistiques de la seance.
