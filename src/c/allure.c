@@ -1,6 +1,7 @@
 #include <pebble.h>
 #include <stdlib.h>
 #include "i18n.h"
+#include "steps.h"
 
 typedef enum {
   ACTIVITY_WALK = 0,
@@ -176,7 +177,7 @@ static bool s_heart_rate_available = false;
 static int s_seconds_since_last_bpm_read = 0;
 
 static int s_current_steps = 0;
-static int s_steps_at_start = 0;
+static StepCounter s_step_counter;
 static int s_seconds_since_last_steps_read = 0;
 
 // Statistiques accumulees sur toute la seance, pour le resume final
@@ -424,13 +425,7 @@ static void refresh_steps_if_needed(void) {
   // de la seance pour obtenir uniquement les pas de la seance en cours.
   HealthValue total_today = health_service_sum_today(HealthMetricStepCount);
 
-  int steps_since_start = (int) total_today - s_steps_at_start;
-
-  if (steps_since_start < 0) {
-    steps_since_start = 0;
-  }
-
-  s_current_steps = steps_since_start;
+  s_current_steps = step_counter_update(&s_step_counter, (int) total_today);
 
 }
 
@@ -1269,10 +1264,7 @@ static void workout_window_load(Window *window) {
   s_seconds_since_last_steps_read = 0;
 
   HealthValue starting_steps = health_service_sum_today(HealthMetricStepCount);
-  s_steps_at_start = (int) starting_steps;
-  if (s_steps_at_start < 0) {
-    s_steps_at_start = 0;
-  }
+  step_counter_start(&s_step_counter, (int) starting_steps);
 
   s_bpm_sum = 0;
   s_bpm_sample_count = 0;
