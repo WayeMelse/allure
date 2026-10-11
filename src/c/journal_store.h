@@ -24,4 +24,16 @@ int journal_index_slot_by_age(const JournalIndex *i, int age);
 void journal_days_add(JournalDays *d, int day, uint32_t distance_m);
 void journal_stats_commit(JournalStats *st, const JournalSession *s);
 
+
+#define JOURNAL_INDEX_SIZE 3
+#define JOURNAL_DAYS_SIZE 50
+#define JOURNAL_STATS_SIZE 13
+
+int journal_index_encode(const JournalIndex *i, uint8_t *b, int capacity);
+bool journal_index_decode(const uint8_t *b, int length, JournalIndex *i);
+int journal_days_encode(const JournalDays *d, uint8_t *b, int capacity);
+bool journal_days_decode(const uint8_t *b, int length, JournalDays *d);
+int journal_stats_encode(const JournalStats *st, uint8_t *b, int capacity);
+bool journal_stats_decode(const uint8_t *b, int length, JournalStats *st);
+
 #endif
