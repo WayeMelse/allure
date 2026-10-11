@@ -19,8 +19,9 @@ English: [README.md](README.md)
 - Résumé de séance : effort, fréquence cardiaque moyenne et maximale,
   calories estimées.
 - Réglages sur le téléphone : unités (métriques ou impériales), horloge
-  12 heures avec AM/PM facultatif, sexe, âge, taille et poids, plus une
-  longueur de pas facultative pour la marche et pour la course.
+  (12 heures avec AM/PM facultatif, ou 24 heures avec ou sans zéro devant
+  l'heure), alertes (vibration et son), sexe, âge, taille et poids, plus
+  une longueur de pas facultative pour la marche et pour la course.
 - La langue suit celle de la montre : anglais, français, allemand, espagnol,
   italien et portugais.
 
@@ -31,6 +32,10 @@ English: [README.md](README.md)
 - Zones (course et entraînement) : moins de 60 %, 60-70 %, 70-80 %, 80-90 % et
   90 % ou plus de ce maximum. La marche utilise des limites plus basses (53, 64,
   75 et 86 %), car une marche rapide reste loin de l'effort d'une course.
+- Alertes (facultatives, réglées sur le téléphone) : vibration et/ou bip à
+  chaque kilomètre ou mile (marche et course), et à chaque changement de
+  zone cardiaque (20 secondes minimum entre deux alertes). Le bip reste muet
+  si la montre est en sourdine.
 - Calories : formule de Keytel, à partir de la fréquence moyenne, du poids, de
   l'âge et du sexe.
 - Distance : nombre de pas multiplié par une longueur de foulée estimée d'après ta taille (ou réglée par toi sur le

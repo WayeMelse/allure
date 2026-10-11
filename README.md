@@ -16,9 +16,10 @@ Français : [README.fr.md](README.fr.md)
   heart-rate zone.
 - Session summary: effort, average and maximum heart rate, estimated
   calories.
-- Settings on the phone: units (metric or imperial), 12-hour clock with
-  optional AM/PM, sex, age, height and weight, plus an optional custom step
-  length for walking and for running.
+- Settings on the phone: units (metric or imperial), clock (12-hour with
+  optional AM/PM, or 24-hour with or without the leading zero), alerts
+  (vibration and sound), sex, age, height and weight, plus an optional
+  custom step length for walking and for running.
 - The language follows the watch language: English, French, German, Spanish,
   Italian and Portuguese.
 
@@ -29,6 +30,9 @@ Français : [README.fr.md](README.fr.md)
 - Zones (run and workout): below 60 %, 60-70 %, 70-80 %, 80-90 % and 90 % or
   more of that maximum. Walking uses lower limits (53, 64, 75 and 86 %),
   because a brisk walk stays well below the effort of a run.
+- Alerts (optional, set on the phone): vibration and/or a beep at each
+  kilometer or mile (walk and run), and when the heart-rate zone changes
+  (at least 20 seconds apart). The beep stays silent if the watch is muted.
 - Calories: Keytel formula, from average heart rate, weight, age and sex.
 - Distance: steps multiplied by a stride length (estimated from your height, or the step length you set
   on the phone).
