@@ -67,6 +67,8 @@ typedef enum {
 #define COUNTDOWN_Y_ADJUST 0
 #define WORKOUT_CLOCK_Y_ADJUST (-8)
 #define SUMMARY_UNIT_Y_OFFSET 6
+// Largeur de la barre noire des boutons (seance et fin de seance).
+#define SIDE_BAR_WIDTH 34
 
 // Profil utilisateur, regle depuis le telephone (page Clay) et memorise
 // sur la montre.
@@ -522,6 +524,14 @@ static long get_pace_seconds(int distance_meters) {
   return ((long) s_elapsed_seconds * 1000) / distance_meters;
 }
 
+// Allure affichable : distance suffisante et pas plus de 99:59.
+#define PACE_MAX_SECONDS 5999
+
+static bool is_pace_displayable(int distance_meters) {
+  return distance_meters > 10 &&
+         get_pace_seconds(distance_meters) <= PACE_MAX_SECONDS;
+}
+
 // Vitesse en centiemes de km/h ou de mph (s_elapsed_seconds doit etre > 0).
 static long get_speed_hundredths(int distance_meters) {
   if (s_stride.units_imperial) {
@@ -602,7 +612,7 @@ static int get_max_heart_rate(void) {
 //   Zone 2 : 60 a 70 %      (endurance de base)       -> vert
 //   Zone 3 : 70 a 80 %      (aerobie / tempo)         -> jaune
 //   Zone 4 : 80 a 90 %      (intense / seuil)         -> orange
-//   Zone 5 : 90 % et plus   (maximal)                 -> rouge pastel
+//   Zone 5 : 90 % et plus   (maximal)                 -> violet vif
 // Hysteresis : la couleur ne change qu'apres avoir depasse le seuil de
 // quelques bpm, pour eviter les clignotements autour d'une limite de zone.
 #define HEART_RATE_ZONE_HYSTERESIS_BPM 3
@@ -724,6 +734,7 @@ static void get_metric_text(void) {
       snprintf(
           s_metric_unit_text,
           sizeof(s_metric_unit_text),
+          "%s",
           get_distance_unit());
 
       snprintf(
@@ -762,7 +773,7 @@ static void get_metric_text(void) {
       break;
 
     case METRIC_PACE:
-      if (distance_meters > 10) {
+      if (is_pace_displayable(distance_meters)) {
         // Allure en secondes par kilometre, calculee en entiers uniquement.
         long pace_seconds_per_km =
             get_pace_seconds(distance_meters);
@@ -780,6 +791,7 @@ static void get_metric_text(void) {
         snprintf(
             s_metric_unit_text,
             sizeof(s_metric_unit_text),
+            "%s",
             get_pace_unit());
       } else {
         snprintf(
@@ -790,6 +802,7 @@ static void get_metric_text(void) {
         snprintf(
             s_metric_unit_text,
             sizeof(s_metric_unit_text),
+            "%s",
             get_pace_unit());
       }
 
@@ -825,6 +838,7 @@ static void get_metric_text(void) {
       snprintf(
           s_metric_unit_text,
           sizeof(s_metric_unit_text),
+          "%s",
           get_speed_unit());
 
       snprintf(
@@ -841,7 +855,7 @@ static void get_metric_text(void) {
 
 static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
-  const int16_t side_bar_width = 34;
+  const int16_t side_bar_width = SIDE_BAR_WIDTH;
   const int16_t content_width = bounds.size.w - side_bar_width;
   const int16_t half_height = bounds.size.h / 2;
 
@@ -1219,7 +1233,7 @@ static void workout_back_click_handler(ClickRecognizerRef recognizer,
   // La seule sortie prevue passe par la pause puis l'ecran de confirmation.
 }
 
-static void workout_back_long_click_handler(ClickRecognizerRef recognizer,
+static void workout_select_long_click_handler(ClickRecognizerRef recognizer,
                                           void *context) {
   s_stay_awake = !s_stay_awake;
   light_enable(s_stay_awake);
@@ -1234,7 +1248,7 @@ static void workout_click_config_provider(void *context) {
   window_long_click_subscribe(
       BUTTON_ID_SELECT,
       700,
-      workout_back_long_click_handler,
+      workout_select_long_click_handler,
       NULL);
 }
 
@@ -1323,7 +1337,7 @@ static void draw_arrow_icon(GContext *ctx, int16_t x, int16_t y,
 
 static void stop_confirm_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
-  const int16_t side_bar_width = 34;
+  const int16_t side_bar_width = SIDE_BAR_WIDTH;
   int16_t content_width = bounds.size.w - side_bar_width;
   GFont font_24 = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   GFont font_18 = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
@@ -1667,7 +1681,7 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
       get_distance_hundredths(distance_meters) / 100,
       get_distance_hundredths(distance_meters) % 100);
 
-  if (distance_meters > 10) {
+  if (is_pace_displayable(distance_meters)) {
     long pace_seconds_per_km =
         get_pace_seconds(distance_meters);
 
