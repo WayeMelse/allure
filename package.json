@@ -45,7 +45,12 @@
       "VibrateKm",
       "VibrateZone",
       "SoundKm",
-      "SoundZone"
+      "SoundZone",
+      "RestingHrOn",
+      "RestingHr",
+      "IntervalMin",
+      "VibrateInterval",
+      "SoundInterval"
     ],
     "resources": {
       "media": [

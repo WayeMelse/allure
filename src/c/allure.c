@@ -4,6 +4,7 @@
 #include "steps.h"
 #include "achievements.h"
 #include "journal.h"
+#include "zones.h"
 
 typedef enum {
   ACTIVITY_WALK = 0,
@@ -80,6 +81,7 @@ typedef struct {
   int16_t age_years;
   int16_t height_cm;
   int16_t weight_kg;
+  int16_t resting_hr;  // 0 = non regle (pourcentage du maximum), sinon Karvonen
 } UserProfile;
 
 static UserProfile s_profile = {
@@ -147,10 +149,14 @@ typedef struct {
   int16_t vibrate_zone;  // 1 = vibrer au changement de zone de FC
   int16_t sound_km;      // 1 = bip a chaque km ou mile
   int16_t sound_zone;    // 1 = bip au changement de zone de FC
+  int16_t interval_minutes;  // 0 = desactive, sinon 2, 5, 10, 15, 20, 30 ou 60
+  int16_t vibrate_interval;  // 1 = vibrer a chaque intervalle
+  int16_t sound_interval;    // 1 = bip a chaque intervalle
 } AlertSettings;
 
-static AlertSettings s_alerts = { 0, 0, 0, 0 };
+static AlertSettings s_alerts = { 0, 0, 0, 0, 0, 0, 0 };
 static int s_alert_km_done = 0;
+static int s_alert_interval_done = 0;
 static int s_alert_zone = -1;
 static int s_alert_zone_second = 0;
 
@@ -633,7 +639,7 @@ static int get_max_heart_rate(void) {
 }
 
 // 5 zones d'effort, en pourcentage de la FC maximale (course et
-// entrainement ; la marche est decalee d'un cran, voir s_zone_percents) :
+// entrainement ; la marche est decalee d'un cran, voir zones.c) :
 //   Zone 1 : moins de 60 %  (tres leger)              -> bleu
 //   Zone 2 : 60 a 70 %      (endurance de base)       -> vert
 //   Zone 3 : 70 a 80 %      (aerobie / tempo)         -> jaune
@@ -647,14 +653,11 @@ static int s_heart_rate_zone = -1;
 
 // Seuils superieurs des zones 1 a 4, en pourcentage de la FC maximale.
 // Marche : vert des 53 %, puis paliers reguliers (11 points) jusqu'a 86 %.
-static const int s_zone_percents[ACTIVITY_COUNT][4] = {
-  [ACTIVITY_WALK]     = {53, 64, 75, 86},
-  [ACTIVITY_RUN]      = {60, 70, 80, 90},
-  [ACTIVITY_TRAINING] = {60, 70, 80, 90}
-};
-
+// Les seuils (pourcentage du maximum, ou reserve cardiaque si la FC au
+// repos est reglee) sont calcules dans zones.c.
 static int get_zone_upper_limit_bpm(int zone, int max_bpm) {
-  return (max_bpm * s_zone_percents[s_selected_activity][zone]) / 100;
+  return zones_upper_limit_bpm((int) s_selected_activity, zone, max_bpm,
+                               s_profile.resting_hr);
 }
 
 // Zone brute (0 a 4) sans hysteresis, pour les statistiques de la seance.
@@ -1088,6 +1091,7 @@ static void journal_session_begin(void) {
 
 static void alerts_reset(void) {
   s_alert_km_done = 0;
+  s_alert_interval_done = 0;
   s_alert_zone = -1;
   s_alert_zone_second = -ALERT_ZONE_MIN_GAP_SECONDS;
 }
@@ -1122,7 +1126,29 @@ static void alert_fire(bool vibrate, bool sound, bool is_km) {
   }
 }
 
+static void alert_fire_interval(bool vibrate, bool sound) {
+  if (vibrate) {
+    vibes_long_pulse();
+  }
+
+  if (sound) {
+    speaker_play_tone(660, 400, ALERT_TONE_VOLUME, SpeakerWaveformSine);
+  }
+}
+
 static void check_alerts(void) {
+  if (s_alerts.interval_minutes > 0 &&
+      (s_alerts.vibrate_interval || s_alerts.sound_interval)) {
+    int interval_count =
+        s_elapsed_seconds / (s_alerts.interval_minutes * 60);
+
+    if (interval_count > s_alert_interval_done) {
+      s_alert_interval_done = interval_count;
+      alert_fire_interval(s_alerts.vibrate_interval,
+                          s_alerts.sound_interval);
+    }
+  }
+
   if (s_selected_activity != ACTIVITY_TRAINING &&
       (s_alerts.vibrate_km || s_alerts.sound_km)) {
     int unit_count = get_distance_hundredths(get_distance_meters()) / 100;
@@ -2046,6 +2072,10 @@ static void profile_sanitize(void) {
 
   if (s_profile.weight_kg < 30) s_profile.weight_kg = 30;
   if (s_profile.weight_kg > 250) s_profile.weight_kg = 250;
+  if (s_profile.resting_hr != 0 &&
+      (s_profile.resting_hr < 35 || s_profile.resting_hr > 110)) {
+    s_profile.resting_hr = 0;
+  }
 }
 
 // Conversions imperial -> metrique, en entiers (arrondi au plus proche).
@@ -2095,6 +2125,15 @@ static void alerts_load(void) {
   s_alerts.vibrate_zone = s_alerts.vibrate_zone ? 1 : 0;
   s_alerts.sound_km = s_alerts.sound_km ? 1 : 0;
   s_alerts.sound_zone = s_alerts.sound_zone ? 1 : 0;
+  s_alerts.vibrate_interval = s_alerts.vibrate_interval ? 1 : 0;
+  s_alerts.sound_interval = s_alerts.sound_interval ? 1 : 0;
+
+  switch (s_alerts.interval_minutes) {
+    case 2: case 5: case 10: case 15: case 20: case 30: case 60:
+      break;
+    default:
+      s_alerts.interval_minutes = 0;
+  }
 }
 
 static void alerts_save(void) {
@@ -2146,6 +2185,14 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
   tuple = dict_find(iter, MESSAGE_KEY_Weight);
   if (tuple) {
     s_profile.weight_kg = (int16_t) tuple_to_int(tuple);
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_RestingHrOn);
+  if (tuple) {
+    Tuple *rest = dict_find(iter, MESSAGE_KEY_RestingHr);
+
+    s_profile.resting_hr = (tuple_to_int(tuple) == 1 && rest)
+        ? (int16_t) tuple_to_int(rest) : 0;
   }
 
   int imperial = s_stride.units_imperial;
@@ -2228,6 +2275,21 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
   tuple = dict_find(iter, MESSAGE_KEY_SoundZone);
   if (tuple) {
     s_alerts.sound_zone = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_IntervalMin);
+  if (tuple) {
+    s_alerts.interval_minutes = (int16_t) tuple_to_int(tuple);
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_VibrateInterval);
+  if (tuple) {
+    s_alerts.vibrate_interval = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_SoundInterval);
+  if (tuple) {
+    s_alerts.sound_interval = (tuple_to_int(tuple) == 1) ? 1 : 0;
   }
 
   alerts_save();
