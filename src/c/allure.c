@@ -179,6 +179,11 @@ static int s_menu_selection = 0;
 static int s_journal_selection = 0;
 static int s_journal_count = 0;
 static JournalSession s_journal_list[JOURNAL_SLOTS];
+static Window *s_detail_window;
+static Layer *s_detail_layer;
+static JournalSession s_detail_session;
+static int s_detail_scroll_offset = 0;
+static int s_detail_content_height = 0;
 static Window *s_stop_confirm_window;
 static Window *s_summary_window;
 
@@ -1488,9 +1493,21 @@ static void journal_back_click_handler(ClickRecognizerRef recognizer,
   window_stack_pop(true);
 }
 
+static void journal_select_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  if (s_journal_count == 0) {
+    return;
+  }
+
+  s_detail_session = s_journal_list[s_journal_selection];
+  s_detail_scroll_offset = 0;
+  window_stack_push(s_detail_window, true);
+}
+
 static void journal_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, journal_up_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, journal_down_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, journal_select_click_handler);
   window_single_click_subscribe(BUTTON_ID_BACK, journal_back_click_handler);
 }
 
@@ -1524,6 +1541,50 @@ static void journal_window_load(Window *window) {
 static void journal_window_unload(Window *window) {
   layer_destroy(s_journal_layer);
   s_journal_layer = NULL;
+}
+
+static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(
+      ctx,
+      tr(STR_ACTIVITY_WALK + s_detail_session.activity),
+      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      GRect(0, 4, bounds.size.w, 30),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentCenter,
+      NULL);
+}
+
+static void detail_back_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  window_stack_pop(true);
+}
+
+static void detail_click_config_provider(void *context) {
+  window_single_click_subscribe(
+      BUTTON_ID_BACK, detail_back_click_handler);
+}
+
+static void detail_window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+
+  window_set_background_color(window, GColorWhite);
+  s_detail_scroll_offset = 0;
+
+  s_detail_layer = layer_create(bounds);
+  layer_set_update_proc(s_detail_layer, detail_layer_update_proc);
+  layer_add_child(window_layer, s_detail_layer);
+}
+
+static void detail_window_unload(Window *window) {
+  layer_destroy(s_detail_layer);
+  s_detail_layer = NULL;
 }
 
 static void countdown_window_load(Window *window) {
@@ -2722,6 +2783,17 @@ static void init(void) {
       (WindowHandlers) {
           .load = journal_window_load,
           .unload = journal_window_unload,
+      });
+
+  s_detail_window = window_create();
+  window_set_click_config_provider(
+      s_detail_window,
+      detail_click_config_provider);
+  window_set_window_handlers(
+      s_detail_window,
+      (WindowHandlers) {
+          .load = detail_window_load,
+          .unload = detail_window_unload,
       });
 
   s_summary_window = window_create();
