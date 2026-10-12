@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "i18n.h"
 #include "steps.h"
+#include "zones.h"
 
 typedef enum {
   ACTIVITY_WALK = 0,
@@ -78,6 +79,7 @@ typedef struct {
   int16_t age_years;
   int16_t height_cm;
   int16_t weight_kg;
+  int16_t resting_hr;  // 0 = non regle (pourcentage du maximum), sinon Karvonen
 } UserProfile;
 
 static UserProfile s_profile = {
@@ -624,7 +626,7 @@ static int get_max_heart_rate(void) {
 }
 
 // 5 zones d'effort, en pourcentage de la FC maximale (course et
-// entrainement ; la marche est decalee d'un cran, voir s_zone_percents) :
+// entrainement ; la marche est decalee d'un cran, voir zones.c) :
 //   Zone 1 : moins de 60 %  (tres leger)              -> bleu
 //   Zone 2 : 60 a 70 %      (endurance de base)       -> vert
 //   Zone 3 : 70 a 80 %      (aerobie / tempo)         -> jaune
@@ -638,14 +640,11 @@ static int s_heart_rate_zone = -1;
 
 // Seuils superieurs des zones 1 a 4, en pourcentage de la FC maximale.
 // Marche : vert des 53 %, puis paliers reguliers (11 points) jusqu'a 86 %.
-static const int s_zone_percents[ACTIVITY_COUNT][4] = {
-  [ACTIVITY_WALK]     = {53, 64, 75, 86},
-  [ACTIVITY_RUN]      = {60, 70, 80, 90},
-  [ACTIVITY_TRAINING] = {60, 70, 80, 90}
-};
-
+// Les seuils (pourcentage du maximum, ou reserve cardiaque si la FC au
+// repos est reglee) sont calcules dans zones.c.
 static int get_zone_upper_limit_bpm(int zone, int max_bpm) {
-  return (max_bpm * s_zone_percents[s_selected_activity][zone]) / 100;
+  return zones_upper_limit_bpm((int) s_selected_activity, zone, max_bpm,
+                               s_profile.resting_hr);
 }
 
 // Zone brute (0 a 4) sans hysteresis, pour les statistiques de la seance.
@@ -2020,6 +2019,10 @@ static void profile_sanitize(void) {
 
   if (s_profile.weight_kg < 30) s_profile.weight_kg = 30;
   if (s_profile.weight_kg > 250) s_profile.weight_kg = 250;
+  if (s_profile.resting_hr != 0 &&
+      (s_profile.resting_hr < 35 || s_profile.resting_hr > 110)) {
+    s_profile.resting_hr = 0;
+  }
 }
 
 // Conversions imperial -> metrique, en entiers (arrondi au plus proche).
@@ -2120,6 +2123,14 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
   tuple = dict_find(iter, MESSAGE_KEY_Weight);
   if (tuple) {
     s_profile.weight_kg = (int16_t) tuple_to_int(tuple);
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_RestingHrOn);
+  if (tuple) {
+    Tuple *rest = dict_find(iter, MESSAGE_KEY_RestingHr);
+
+    s_profile.resting_hr = (tuple_to_int(tuple) == 1 && rest)
+        ? (int16_t) tuple_to_int(rest) : 0;
   }
 
   int imperial = s_stride.units_imperial;
