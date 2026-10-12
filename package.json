@@ -80,7 +80,7 @@
           "type": "font",
           "name": "FONT_NOTO_EMOJI_40",
           "file": "fonts/notoemoji.ttf",
-          "characterRegex": "[\\U0001F6B6\\U0001F3C3\\u2665]"
+          "characterRegex": "[\\U0001F6B6\\U0001F3C3\\u2665\\U0001F4D6]"
         },
         {
           "type": "font",

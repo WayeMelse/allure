@@ -16,6 +16,8 @@ typedef enum {
   ACTIVITY_COUNT
 } Activity;
 
+#define MENU_ROWS (ACTIVITY_COUNT + 1)
+
 typedef enum {
   METRIC_DURATION = 0,
   METRIC_STEPS,
@@ -171,6 +173,12 @@ static GFont s_emoji_font = NULL;
 static Window *s_menu_window;
 static Window *s_countdown_window;
 static Window *s_workout_window;
+static Window *s_journal_window;
+static Layer *s_journal_layer;
+static int s_menu_selection = 0;
+static int s_journal_selection = 0;
+static int s_journal_count = 0;
+static JournalSession s_journal_list[JOURNAL_SLOTS];
 static Window *s_stop_confirm_window;
 static Window *s_summary_window;
 
@@ -343,9 +351,9 @@ static void menu_layer_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
-  for (int i = 0; i < ACTIVITY_COUNT; i++) {
+  for (int i = 0; i < MENU_ROWS; i++) {
     int16_t row_y = first_row_y + i * row_height;
-    bool selected = (i == s_selected_activity);
+    bool selected = (i == s_menu_selection);
 
     if (selected) {
       graphics_context_set_fill_color(ctx, ACCENT_YELLOW);
@@ -358,21 +366,43 @@ static void menu_layer_update_proc(Layer *layer, GContext *ctx) {
 
     GColor icon_color = selected ? GColorBlack : GColorDarkGray;
 
-    draw_activity_emoji(
-        ctx,
-        (Activity) i,
-        GRect(8, row_y + 3, 60, 50),
-        icon_color);
+    if (i < ACTIVITY_COUNT) {
+      draw_activity_emoji(
+          ctx,
+          (Activity) i,
+          GRect(8, row_y + 3, 60, 50),
+          icon_color);
 
-    graphics_context_set_text_color(ctx, GColorBlack);
-    graphics_draw_text(
-        ctx,
-        tr(STR_ACTIVITY_WALK + (i)),
-        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-        GRect(76, row_y + 14, bounds.size.w - 82, 32),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
+      graphics_context_set_text_color(ctx, GColorBlack);
+      graphics_draw_text(
+          ctx,
+          tr(STR_ACTIVITY_WALK + (i)),
+          fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+          GRect(76, row_y + 14, bounds.size.w - 82, 32),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft,
+          NULL);
+    } else {
+      graphics_context_set_text_color(ctx, icon_color);
+      graphics_draw_text(
+          ctx,
+          "\xF0\x9F\x93\x96",
+          s_emoji_font,
+          GRect(8, row_y + 3, 60, 50),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentCenter,
+          NULL);
+
+      graphics_context_set_text_color(ctx, GColorBlack);
+      graphics_draw_text(
+          ctx,
+          "Journal",
+          fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+          GRect(76, row_y + 14, bounds.size.w - 82, 32),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft,
+          NULL);
+    }
   }
 }
 
@@ -1319,23 +1349,27 @@ static void start_countdown(void) {
 
 static void menu_up_click_handler(ClickRecognizerRef recognizer,
                                   void *context) {
-  s_selected_activity =
-      (s_selected_activity + ACTIVITY_COUNT - 1) % ACTIVITY_COUNT;
+  s_menu_selection =
+      (s_menu_selection + MENU_ROWS - 1) % MENU_ROWS;
 
   layer_mark_dirty(s_menu_layer);
 }
 
 static void menu_down_click_handler(ClickRecognizerRef recognizer,
                                     void *context) {
-  s_selected_activity =
-      (s_selected_activity + 1) % ACTIVITY_COUNT;
+  s_menu_selection = (s_menu_selection + 1) % MENU_ROWS;
 
   layer_mark_dirty(s_menu_layer);
 }
 
 static void menu_select_click_handler(ClickRecognizerRef recognizer,
                                       void *context) {
-  start_countdown();
+  if (s_menu_selection < ACTIVITY_COUNT) {
+    s_selected_activity = (Activity) s_menu_selection;
+    start_countdown();
+  } else {
+    window_stack_push(s_journal_window, true);
+  }
 }
 
 static void menu_click_config_provider(void *context) {
@@ -1358,6 +1392,138 @@ static void menu_window_load(Window *window) {
 static void menu_window_unload(Window *window) {
   layer_destroy(s_menu_layer);
   s_menu_layer = NULL;
+}
+
+static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  const int16_t row_height = 44;
+  const int16_t first_row_y = 40;
+
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(
+      ctx,
+      "Journal",
+      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      GRect(0, 4, bounds.size.w, 30),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentCenter,
+      NULL);
+
+  if (s_journal_count == 0) {
+    graphics_draw_text(
+        ctx,
+        tr(STR_TOO_SHORT),
+        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+        GRect(6, 100, bounds.size.w - 12, 40),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentCenter,
+        NULL);
+    return;
+  }
+
+  for (int i = 0; i < s_journal_count; i++) {
+    int16_t row_y = first_row_y + i * row_height;
+    bool selected = (i == s_journal_selection);
+    char duration_text[16];
+
+    if (selected) {
+      graphics_context_set_fill_color(ctx, ACCENT_YELLOW);
+      graphics_fill_rect(
+          ctx,
+          GRect(0, row_y, bounds.size.w, row_height),
+          0,
+          GCornerNone);
+    }
+
+    snprintf(duration_text, sizeof(duration_text), "%d min",
+             (int) (s_journal_list[i].active_seconds / 60));
+
+    graphics_context_set_text_color(ctx, GColorBlack);
+    graphics_draw_text(
+        ctx,
+        tr(STR_ACTIVITY_WALK + s_journal_list[i].activity),
+        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+        GRect(8, row_y + 4, 120, 22),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft,
+        NULL);
+
+    graphics_draw_text(
+        ctx,
+        duration_text,
+        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+        GRect(bounds.size.w - 78, row_y + 4, 70, 22),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentRight,
+        NULL);
+  }
+}
+
+static void journal_up_click_handler(ClickRecognizerRef recognizer,
+                                     void *context) {
+  if (s_journal_count == 0) {
+    return;
+  }
+
+  s_journal_selection =
+      (s_journal_selection + s_journal_count - 1) % s_journal_count;
+  layer_mark_dirty(s_journal_layer);
+}
+
+static void journal_down_click_handler(ClickRecognizerRef recognizer,
+                                       void *context) {
+  if (s_journal_count == 0) {
+    return;
+  }
+
+  s_journal_selection = (s_journal_selection + 1) % s_journal_count;
+  layer_mark_dirty(s_journal_layer);
+}
+
+static void journal_back_click_handler(ClickRecognizerRef recognizer,
+                                       void *context) {
+  window_stack_pop(true);
+}
+
+static void journal_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_UP, journal_up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, journal_down_click_handler);
+  window_single_click_subscribe(BUTTON_ID_BACK, journal_back_click_handler);
+}
+
+static void journal_window_load(Window *window) {
+  JournalIndex index;
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+
+  window_set_background_color(window, GColorWhite);
+
+  journal_load_index(&index);
+  s_journal_count = index.count;
+
+  if (s_journal_selection >= s_journal_count) {
+    s_journal_selection = 0;
+  }
+
+  for (int i = 0; i < s_journal_count; i++) {
+    int slot = journal_index_slot_by_age(&index, i);
+
+    if (slot >= 0) {
+      journal_load_session(slot, &s_journal_list[i]);
+    }
+  }
+
+  s_journal_layer = layer_create(bounds);
+  layer_set_update_proc(s_journal_layer, journal_layer_update_proc);
+  layer_add_child(window_layer, s_journal_layer);
+}
+
+static void journal_window_unload(Window *window) {
+  layer_destroy(s_journal_layer);
+  s_journal_layer = NULL;
 }
 
 static void countdown_window_load(Window *window) {
@@ -2547,6 +2713,17 @@ static void init(void) {
           .unload = stop_confirm_window_unload,
       });
 
+  s_journal_window = window_create();
+  window_set_click_config_provider(
+      s_journal_window,
+      journal_click_config_provider);
+  window_set_window_handlers(
+      s_journal_window,
+      (WindowHandlers) {
+          .load = journal_window_load,
+          .unload = journal_window_unload,
+      });
+
   s_summary_window = window_create();
   window_set_click_config_provider(
       s_summary_window,
@@ -2573,6 +2750,7 @@ static void deinit(void) {
   window_destroy(s_stop_confirm_window);
   window_destroy(s_workout_window);
   window_destroy(s_countdown_window);
+  window_destroy(s_journal_window);
   window_destroy(s_menu_window);
 
   fonts_unload_custom_font(s_roboto_condensed_extrabold_font);
