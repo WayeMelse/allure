@@ -50,7 +50,11 @@
       "RestingHr",
       "IntervalMin",
       "VibrateInterval",
-      "SoundInterval"
+      "SoundInterval",
+      "GoalSessionSteps",
+      "GoalSessionDistanceKm",
+      "GoalWeekDistanceKm",
+      "GoalWeekSessions"
     ],
     "resources": {
       "media": [

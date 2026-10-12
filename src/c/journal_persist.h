@@ -7,6 +7,7 @@
 
 // Cles de stockage persistant (1, 3, 4, 5 sont deja prises ; 2 est abandonnee).
 #define JOURNAL_INDEX_KEY 6
+#define JOURNAL_GOALS_PERSIST_KEY 7
 #define JOURNAL_SLOT_KEY_BASE 10
 #define JOURNAL_STATS_KEY 20
 #define JOURNAL_DAYS_KEY 21

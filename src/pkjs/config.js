@@ -105,6 +105,16 @@ var weightLb = t.weight.replace('(kg)', '(lb)');
 var walkInch = t.strideWalk.replace('(cm)', '(in)');
 var runInch = t.strideRun.replace('(cm)', '(in)');
 
+var GOALS_TEXTS = {
+  en: { title: 'Goals', steps: 'Session step goal', dist: 'Session distance goal (km)', weekDist: '7-day distance goal (km)', weekSessions: '7-day session goal', hint: 'Set a session goal (steps or distance) for the Bullseye achievement. Set a goal to 0 to disable it.' },
+  fr: { title: 'Objectifs', steps: 'Objectif de pas par s\u00e9ance', dist: 'Objectif de distance par s\u00e9ance (km)', weekDist: 'Objectif de distance sur 7 jours (km)', weekSessions: 'Objectif de s\u00e9ances sur 7 jours', hint: 'D\u00e9finissez un objectif par s\u00e9ance (pas ou distance) pour le succ\u00e8s \u00ab Dans le mille \u00bb. Mettez un objectif \u00e0 0 pour le d\u00e9sactiver.' },
+  de: { title: 'Ziele', steps: 'Schrittziel pro Einheit', dist: 'Streckenziel pro Einheit (km)', weekDist: '7-Tage-Streckenziel (km)', weekSessions: 'Ziel f\u00fcr Einheiten in 7 Tagen', hint: 'Lege ein Ziel pro Einheit (Schritte oder Strecke) f\u00fcr \u201eVolltreffer\u201c fest. Setze ein Ziel auf 0, um es zu deaktivieren.' },
+  es: { title: 'Objetivos', steps: 'Objetivo de pasos por sesi\u00f3n', dist: 'Objetivo de distancia por sesi\u00f3n (km)', weekDist: 'Objetivo de distancia en 7 d\u00edas (km)', weekSessions: 'Objetivo de sesiones en 7 d\u00edas', hint: 'Define un objetivo por sesi\u00f3n (pasos o distancia) para el logro \u00abEn el blanco\u00bb. Pon un objetivo en 0 para desactivarlo.' },
+  it: { title: 'Obiettivi', steps: 'Obiettivo passi per sessione', dist: 'Obiettivo distanza per sessione (km)', weekDist: 'Obiettivo distanza su 7 giorni (km)', weekSessions: 'Obiettivo sessioni su 7 giorni', hint: 'Imposta un obiettivo per sessione (passi o distanza) per il traguardo \u00abNel segno\u00bb. Imposta un obiettivo a 0 per disattivarlo.' },
+  pt: { title: 'Metas', steps: 'Meta de passos por sess\u00e3o', dist: 'Meta de dist\u00e2ncia por sess\u00e3o (km)', weekDist: 'Meta de dist\u00e2ncia em 7 dias (km)', weekSessions: 'Meta de sess\u00f5es em 7 dias', hint: 'Defina uma meta por sess\u00e3o (passos ou dist\u00e2ncia) para a conquista \u00abNa mosca\u00bb. Coloque uma meta em 0 para desativ\u00e1-la.' }
+};
+var tg = GOALS_TEXTS[language] || GOALS_TEXTS.en;
+
 module.exports = [
   { "type": "heading", "defaultValue": "Allure" },
   { "type": "text", "defaultValue": t.intro },
@@ -207,6 +217,21 @@ module.exports = [
         "defaultValue": 100, "min": 40, "max": 160, "step": 1 },
       { "type": "slider", "messageKey": "StrideRunInch", "label": runInch,
         "defaultValue": 39, "min": 16, "max": 63, "step": 1 }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": tg.title },
+      { "type": "slider", "messageKey": "GoalSessionSteps", "label": tg.steps,
+        "defaultValue": 0, "min": 0, "max": 30000, "step": 500 },
+      { "type": "slider", "messageKey": "GoalSessionDistanceKm", "label": tg.dist,
+        "defaultValue": 0, "min": 0, "max": 50, "step": 1 },
+      { "type": "slider", "messageKey": "GoalWeekDistanceKm", "label": tg.weekDist,
+        "defaultValue": 50, "min": 0, "max": 200, "step": 5 },
+      { "type": "slider", "messageKey": "GoalWeekSessions", "label": tg.weekSessions,
+        "defaultValue": 0, "min": 0, "max": 14, "step": 1 },
+      { "type": "text", "defaultValue": tg.hint }
     ]
   },
   { "type": "submit", "defaultValue": t.save }

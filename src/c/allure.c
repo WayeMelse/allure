@@ -225,6 +225,7 @@ static int s_effort_rating = 0;
 
 // Suivi de la seance pour le journal (voir journal.h).
 static JournalSession s_journal;
+static JournalGoals s_goals;
 static time_t s_session_start_time = 0;
 static int s_session_start_hour = 0;
 static int s_session_start_day = 0;
@@ -1688,7 +1689,6 @@ static void stop_confirm_down_click_handler(ClickRecognizerRef recognizer,
 static void journal_session_save(void) {
   JournalStats stats;
   JournalDays days;
-  JournalGoals goals = { 0, 0, 0, 0 };
   int avg_bpm = 0;
   int avg_zone_x10 = 0;
   int score = get_effort_score();
@@ -1729,7 +1729,7 @@ static void journal_session_save(void) {
   s_journal.feeling = (uint8_t) s_effort_rating;
   s_journal.level = (uint8_t) level;
   s_journal.achievements = achievements_compute(
-      &s_journal, &stats, &days, &goals,
+      &s_journal, &stats, &days, &s_goals,
       s_session_start_hour, s_session_start_day);
 
   journal_save_all(&s_journal, s_session_start_day);
@@ -2276,6 +2276,8 @@ static void alerts_save(void) {
   persist_write_data(ALERT_PERSIST_KEY, &s_alerts, sizeof(s_alerts));
 }
 
+static void goals_load(void);
+
 static void profile_load(void) {
   if (persist_exists(PROFILE_PERSIST_KEY)) {
     persist_read_data(PROFILE_PERSIST_KEY, &s_profile, sizeof(s_profile));
@@ -2285,6 +2287,24 @@ static void profile_load(void) {
   stride_load();
   clock_load();
   alerts_load();
+  goals_load();
+}
+
+static void goals_load(void) {
+  if (persist_exists(JOURNAL_GOALS_PERSIST_KEY)) {
+    persist_read_data(JOURNAL_GOALS_PERSIST_KEY, &s_goals,
+                      sizeof(s_goals));
+  }
+
+  if (s_goals.week_distance_m == 0) {
+    s_goals.week_distance_m = 50000;
+  }
+  s_goals.goal_is_steps = s_goals.goal_is_steps ? 1 : 0;
+}
+
+static void goals_save(void) {
+  persist_write_data(JOURNAL_GOALS_PERSIST_KEY, &s_goals,
+                     sizeof(s_goals));
 }
 
 static void profile_save(void) {
@@ -2428,8 +2448,37 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     s_alerts.sound_interval = (tuple_to_int(tuple) == 1) ? 1 : 0;
   }
 
+  tuple = dict_find(iter, MESSAGE_KEY_GoalSessionSteps);
+  if (tuple) {
+    s_goals.session_goal = (uint32_t) tuple_to_int(tuple);
+    s_goals.goal_is_steps = (s_goals.session_goal > 0) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_GoalSessionDistanceKm);
+  if (tuple) {
+    int km = tuple_to_int(tuple);
+
+    if (s_goals.goal_is_steps == 0) {
+      s_goals.session_goal = (km > 0) ? (uint32_t) km * 1000 : 0;
+    }
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_GoalWeekDistanceKm);
+  if (tuple) {
+    int km = tuple_to_int(tuple);
+
+    s_goals.week_distance_m =
+        (km > 0) ? (uint32_t) km * 1000 : 50000;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_GoalWeekSessions);
+  if (tuple) {
+    s_goals.week_sessions = (uint16_t) tuple_to_int(tuple);
+  }
+
   alerts_save();
   clock_save();
+  goals_save();
 
   profile_sanitize();
   profile_save();
