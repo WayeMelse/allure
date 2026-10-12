@@ -84,6 +84,20 @@ var RESTING_TEXTS = {
 };
 var trh = RESTING_TEXTS[language] || RESTING_TEXTS.en;
 
+var INTERVAL_TEXTS = {
+  en: { label: 'Regular alert', off: 'Off', min: 'min', vib: 'Vibrate at each interval', snd: 'Beep at each interval' },
+  fr: { label: 'Alerte r\u00e9guli\u00e8re', off: 'D\u00e9sactiv\u00e9e', min: 'min', vib: 'Vibrer \u00e0 chaque intervalle', snd: 'Bip \u00e0 chaque intervalle' },
+  de: { label: 'Regelm\u00e4\u00dfiger Hinweis', off: 'Aus', min: 'Min.', vib: 'Bei jedem Intervall vibrieren', snd: 'Signalton bei jedem Intervall' },
+  es: { label: 'Aviso peri\u00f3dico', off: 'Desactivado', min: 'min', vib: 'Vibrar en cada intervalo', snd: 'Pitido en cada intervalo' },
+  it: { label: 'Avviso periodico', off: 'Disattivato', min: 'min', vib: 'Vibra a ogni intervallo', snd: 'Segnale acustico a ogni intervallo' },
+  pt: { label: 'Alerta regular', off: 'Desligado', min: 'min', vib: 'Vibrar a cada intervalo', snd: 'Sinal sonoro a cada intervalo' }
+};
+var ti = INTERVAL_TEXTS[language] || INTERVAL_TEXTS.en;
+var intervalOptions = [{ "label": ti.off, "value": "0" }].concat(
+  [2, 5, 10, 15, 20, 30, 60].map(function (m) {
+    return { "label": m + ' ' + ti.min, "value": String(m) };
+  }));
+
 // Libelles imperiaux deduits des libelles metriques deja traduits.
 var heightFt = t.height.replace('(cm)', '(ft)');
 var heightIn = t.height.replace('(cm)', '(in)');
@@ -133,6 +147,12 @@ module.exports = [
       { "type": "toggle", "messageKey": "SoundKm", "label": ta.sndKm,
         "defaultValue": false },
       { "type": "toggle", "messageKey": "SoundZone", "label": ta.sndZone,
+        "defaultValue": false },
+      { "type": "select", "messageKey": "IntervalMin", "label": ti.label,
+        "defaultValue": "0", "options": intervalOptions },
+      { "type": "toggle", "messageKey": "VibrateInterval", "label": ti.vib,
+        "defaultValue": false },
+      { "type": "toggle", "messageKey": "SoundInterval", "label": ti.snd,
         "defaultValue": false },
       { "type": "text", "defaultValue": ta.hint }
     ]

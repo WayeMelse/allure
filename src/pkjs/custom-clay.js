@@ -38,6 +38,8 @@ module.exports = function () {
     setVisible(['ShowAmPm'], !!item('Clock12h').get());
     setVisible(['HideHourZero'], !item('Clock12h').get());
     setVisible(['RestingHr'], !!item('RestingHrOn').get());
+    setVisible(['VibrateInterval', 'SoundInterval'],
+               String(item('IntervalMin').get()) !== '0');
   }
 
   function toImperial() {
@@ -78,5 +80,6 @@ module.exports = function () {
     item('StrideRunOn').on('change', refresh);
     item('Clock12h').on('change', refresh);
     item('RestingHrOn').on('change', refresh);
+    item('IntervalMin').on('change', refresh);
   });
 };

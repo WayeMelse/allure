@@ -147,10 +147,14 @@ typedef struct {
   int16_t vibrate_zone;  // 1 = vibrer au changement de zone de FC
   int16_t sound_km;      // 1 = bip a chaque km ou mile
   int16_t sound_zone;    // 1 = bip au changement de zone de FC
+  int16_t interval_minutes;  // 0 = desactive, sinon 2, 5, 10, 15, 20, 30 ou 60
+  int16_t vibrate_interval;  // 1 = vibrer a chaque intervalle
+  int16_t sound_interval;    // 1 = bip a chaque intervalle
 } AlertSettings;
 
-static AlertSettings s_alerts = { 0, 0, 0, 0 };
+static AlertSettings s_alerts = { 0, 0, 0, 0, 0, 0, 0 };
 static int s_alert_km_done = 0;
+static int s_alert_interval_done = 0;
 static int s_alert_zone = -1;
 static int s_alert_zone_second = 0;
 
@@ -1062,6 +1066,7 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
 
 static void alerts_reset(void) {
   s_alert_km_done = 0;
+  s_alert_interval_done = 0;
   s_alert_zone = -1;
   s_alert_zone_second = -ALERT_ZONE_MIN_GAP_SECONDS;
 }
@@ -1096,7 +1101,29 @@ static void alert_fire(bool vibrate, bool sound, bool is_km) {
   }
 }
 
+static void alert_fire_interval(bool vibrate, bool sound) {
+  if (vibrate) {
+    vibes_long_pulse();
+  }
+
+  if (sound) {
+    speaker_play_tone(660, 400, ALERT_TONE_VOLUME, SpeakerWaveformSine);
+  }
+}
+
 static void check_alerts(void) {
+  if (s_alerts.interval_minutes > 0 &&
+      (s_alerts.vibrate_interval || s_alerts.sound_interval)) {
+    int interval_count =
+        s_elapsed_seconds / (s_alerts.interval_minutes * 60);
+
+    if (interval_count > s_alert_interval_done) {
+      s_alert_interval_done = interval_count;
+      alert_fire_interval(s_alerts.vibrate_interval,
+                          s_alerts.sound_interval);
+    }
+  }
+
   if (s_selected_activity != ACTIVITY_TRAINING &&
       (s_alerts.vibrate_km || s_alerts.sound_km)) {
     int unit_count = get_distance_hundredths(get_distance_meters()) / 100;
@@ -2072,6 +2099,15 @@ static void alerts_load(void) {
   s_alerts.vibrate_zone = s_alerts.vibrate_zone ? 1 : 0;
   s_alerts.sound_km = s_alerts.sound_km ? 1 : 0;
   s_alerts.sound_zone = s_alerts.sound_zone ? 1 : 0;
+  s_alerts.vibrate_interval = s_alerts.vibrate_interval ? 1 : 0;
+  s_alerts.sound_interval = s_alerts.sound_interval ? 1 : 0;
+
+  switch (s_alerts.interval_minutes) {
+    case 2: case 5: case 10: case 15: case 20: case 30: case 60:
+      break;
+    default:
+      s_alerts.interval_minutes = 0;
+  }
 }
 
 static void alerts_save(void) {
@@ -2213,6 +2249,21 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
   tuple = dict_find(iter, MESSAGE_KEY_SoundZone);
   if (tuple) {
     s_alerts.sound_zone = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_IntervalMin);
+  if (tuple) {
+    s_alerts.interval_minutes = (int16_t) tuple_to_int(tuple);
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_VibrateInterval);
+  if (tuple) {
+    s_alerts.vibrate_interval = (tuple_to_int(tuple) == 1) ? 1 : 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_SoundInterval);
+  if (tuple) {
+    s_alerts.sound_interval = (tuple_to_int(tuple) == 1) ? 1 : 0;
   }
 
   alerts_save();
