@@ -4,7 +4,10 @@
 #include "steps.h"
 #include "achievements.h"
 #include "journal.h"
+#include "journal_persist.h"
 #include "zones.h"
+
+static int get_effort_score(void);
 
 typedef enum {
   ACTIVITY_WALK = 0,
@@ -186,6 +189,7 @@ static int s_countdown_value = 3;
 static int s_elapsed_seconds = 0;
 
 static bool s_is_paused = false;
+static int s_paused_seconds = 0;
 static bool s_stay_awake = false;
 
 static AppTimer *s_countdown_timer;
@@ -1265,6 +1269,8 @@ static void workout_tick_handler(struct tm *tick_time,
     refresh_steps_if_needed();
     check_alerts();
     journal_track_tick();
+  } else {
+    s_paused_seconds++;
   }
 
   if (s_workout_layer != NULL) {
@@ -1501,6 +1507,7 @@ static void workout_window_load(Window *window) {
   s_effort_choice = 0;
   s_effort_rating = 0;
   s_bpm_max = 0;
+  s_paused_seconds = 0;
 
   health_service_set_heart_rate_sample_period(1);
 
@@ -1678,6 +1685,56 @@ static void stop_confirm_down_click_handler(ClickRecognizerRef recognizer,
   layer_mark_dirty(s_stop_confirm_layer);
 }
 
+static void journal_session_save(void) {
+  JournalStats stats;
+  JournalDays days;
+  JournalGoals goals = { 0, 0, 0, 0 };
+  int avg_bpm = 0;
+  int avg_zone_x10 = 0;
+  int score = get_effort_score();
+  int level = 0;
+
+  journal_load_stats(&stats);
+  journal_load_days(&days);
+
+  if (s_bpm_sample_count > 0) {
+    avg_bpm = (int) (s_bpm_sum / s_bpm_sample_count);
+    avg_zone_x10 = (int) ((s_zone_points_sum * 10) / s_bpm_sample_count);
+  }
+
+  if (score == 0) {
+    level = 0;
+  } else if (score < 18) {
+    level = 1;
+  } else if (score < 28) {
+    level = 2;
+  } else if (score < 38) {
+    level = 3;
+  } else if (score < 46) {
+    level = 4;
+  } else {
+    level = 5;
+  }
+
+  s_journal.active_seconds = (uint16_t) s_elapsed_seconds;
+  s_journal.total_seconds =
+      (uint16_t) (s_elapsed_seconds + s_paused_seconds);
+  s_journal.steps = (uint32_t) s_current_steps;
+  s_journal.distance_m = (uint32_t) get_distance_meters();
+  s_journal.calories = (uint16_t) get_session_calories();
+  s_journal.avg_bpm = (uint8_t) avg_bpm;
+  s_journal.max_bpm = (uint8_t) s_bpm_max;
+  s_journal.avg_zone_x10 = (uint8_t) avg_zone_x10;
+  s_journal.effort_score = (uint8_t) score;
+  s_journal.feeling = (uint8_t) s_effort_rating;
+  s_journal.level = (uint8_t) level;
+  s_journal.achievements = achievements_compute(
+      &s_journal, &stats, &days, &goals,
+      s_session_start_hour, s_session_start_day);
+
+  journal_save_all(&s_journal, s_session_start_day);
+}
+
 static void stop_confirm_select_click_handler(ClickRecognizerRef recognizer,
                                               void *context) {
   if (s_effort_choice == 0) {
@@ -1688,6 +1745,7 @@ static void stop_confirm_select_click_handler(ClickRecognizerRef recognizer,
   }
 
   s_effort_rating = s_effort_choice;
+  journal_session_save();
   tick_timer_service_unsubscribe();
   window_stack_pop(true);
   window_stack_pop(true);
