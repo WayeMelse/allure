@@ -345,8 +345,8 @@ static void draw_activity_emoji(GContext *ctx, Activity activity,
 
 static void menu_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
-  const int16_t row_height = 56;
-  const int16_t first_row_y = 12;
+  const int16_t row_height = 54;
+  const int16_t first_row_y = 6;
 
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
