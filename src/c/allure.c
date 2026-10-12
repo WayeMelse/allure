@@ -1689,11 +1689,10 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   int achievement = journal_top_achievement(d->achievements);
 
   if (achievement >= 0) {
-    snprintf(
-        text, sizeof(text), "#%d", achievement + 1);
     draw_summary_line(
-        ctx, y, text, "",
-        tr(STR_SUMMARY_ACHIEVEMENT), value_font);
+        ctx, y,
+        tr(STR_ACHIEVEMENT_WELCOME_BACK + achievement),
+        "", tr(STR_SUMMARY_ACHIEVEMENT), value_font);
     y += step;
   }
 
