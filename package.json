@@ -45,7 +45,9 @@
       "VibrateKm",
       "VibrateZone",
       "SoundKm",
-      "SoundZone"
+      "SoundZone",
+      "RestingHrOn",
+      "RestingHr"
     ],
     "resources": {
       "media": [

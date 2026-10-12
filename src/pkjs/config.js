@@ -74,6 +74,16 @@ var ALERT_TEXTS = {
 };
 var ta = ALERT_TEXTS[language] || ALERT_TEXTS.en;
 
+var RESTING_TEXTS = {
+  en: { on: 'Use my resting heart rate', rate: 'Resting heart rate (bpm)', hint: 'Optional. When on, heart-rate zones use your heart-rate reserve (Karvonen method). Measure it at rest, for example just after waking up.' },
+  fr: { on: 'Utiliser ma fr\u00e9quence cardiaque au repos', rate: 'FC au repos (bpm)', hint: 'Facultatif. Si l\u2019option est activ\u00e9e, les zones cardiaques utilisent votre r\u00e9serve cardiaque (m\u00e9thode de Karvonen). Mesurez-la au repos, par exemple au r\u00e9veil.' },
+  de: { on: 'Meinen Ruhepuls verwenden', rate: 'Ruhepuls (bpm)', hint: 'Optional. Wenn aktiviert, nutzen die Herzfrequenzzonen Ihre Herzfrequenzreserve (Karvonen-Methode). Messen Sie ihn in Ruhe, z. B. direkt nach dem Aufwachen.' },
+  es: { on: 'Usar mi frecuencia card\u00edaca en reposo', rate: 'Frecuencia en reposo (bpm)', hint: 'Opcional. Si est\u00e1 activado, las zonas card\u00edacas usan su reserva card\u00edaca (m\u00e9todo de Karvonen). M\u00eddala en reposo, por ejemplo al despertar.' },
+  it: { on: 'Usa la mia frequenza cardiaca a riposo', rate: 'FC a riposo (bpm)', hint: 'Facoltativo. Se attivo, le zone cardiache usano la tua riserva cardiaca (metodo di Karvonen). Misurala a riposo, ad esempio al risveglio.' },
+  pt: { on: 'Usar a minha frequ\u00eancia card\u00edaca em repouso', rate: 'FC em repouso (bpm)', hint: 'Opcional. Se ativado, as zonas card\u00edacas usam a sua reserva card\u00edaca (m\u00e9todo de Karvonen). Me\u00e7a-a em repouso, por exemplo ao acordar.' }
+};
+var trh = RESTING_TEXTS[language] || RESTING_TEXTS.en;
+
 // Libelles imperiaux deduits des libelles metriques deja traduits.
 var heightFt = t.height.replace('(cm)', '(ft)');
 var heightIn = t.height.replace('(cm)', '(in)');
@@ -152,7 +162,12 @@ module.exports = [
       { "type": "slider", "messageKey": "Weight", "label": t.weight,
         "defaultValue": 75, "min": 30, "max": 250, "step": 1 },
       { "type": "slider", "messageKey": "WeightLb", "label": weightLb,
-        "defaultValue": 165, "min": 66, "max": 550, "step": 1 }
+        "defaultValue": 165, "min": 66, "max": 550, "step": 1 },
+      { "type": "toggle", "messageKey": "RestingHrOn", "label": trh.on,
+        "defaultValue": false },
+      { "type": "slider", "messageKey": "RestingHr", "label": trh.rate,
+        "defaultValue": 60, "min": 35, "max": 110, "step": 1 },
+      { "type": "text", "defaultValue": trh.hint }
     ]
   },
   {
