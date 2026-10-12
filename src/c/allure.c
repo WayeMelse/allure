@@ -224,6 +224,13 @@ static JournalSession s_journal;
 static time_t s_session_start_time = 0;
 static int s_session_start_hour = 0;
 static int s_session_start_day = 0;
+static int s_journal_zone_event = -1;
+static int s_journal_zone_event_second = 0;
+static int s_journal_zone_events = 0;
+static int s_journal_borne_done = 0;
+static int s_journal_borne_events = 0;
+static int s_journal_flame_done = 0;
+static int s_journal_flame_events = 0;
 static int s_zone_run_seconds = 0;  // duree consecutive en zone 4 ou 5
 
 // Defilement vertical de l'ecran de resume
@@ -1080,6 +1087,13 @@ static void journal_session_begin(void) {
   struct tm *t = localtime(&now);
 
   memset(&s_journal, 0, sizeof(s_journal));
+  s_journal_zone_event = -1;
+  s_journal_zone_event_second = 0;
+  s_journal_zone_events = 0;
+  s_journal_borne_done = 0;
+  s_journal_borne_events = 0;
+  s_journal_flame_done = 0;
+  s_journal_flame_events = 0;
   s_journal.activity = (uint8_t) s_selected_activity;
   s_journal.start_time = (uint32_t) now;
   s_session_start_time = now;
@@ -1180,6 +1194,69 @@ static void check_alerts(void) {
   }
 }
 
+static void journal_track_tick(void) {
+  // Zones : secondes par zone, redline (zone 4 ou 5 consecutive) et
+  // evenement de changement de zone tenu au moins 60 s.
+  if (s_heart_rate_available && s_heart_rate_zone >= 0 &&
+      s_heart_rate_zone < JOURNAL_ZONE_COUNT) {
+    s_journal.zone_seconds[s_heart_rate_zone]++;
+
+    if (s_heart_rate_zone >= 3) {
+      s_journal.redline_seconds++;
+    } else {
+      s_journal.redline_seconds = 0;
+    }
+
+    if (s_heart_rate_zone != s_journal_zone_event) {
+      s_journal_zone_event = s_heart_rate_zone;
+      s_journal_zone_event_second = s_elapsed_seconds;
+    } else if (s_elapsed_seconds - s_journal_zone_event_second >= 60 &&
+               s_journal.event_count < JOURNAL_MAX_EVENTS &&
+               s_journal_zone_events < JOURNAL_MAX_ZONE_EVENTS) {
+      journal_add_event(&s_journal, JE_ZONE,
+                        (uint16_t) s_elapsed_seconds,
+                        (uint8_t) s_heart_rate_zone);
+      s_journal_zone_events++;
+      s_journal_zone_event_second = s_elapsed_seconds;
+    }
+  } else {
+    s_journal_zone_event = -1;
+    s_journal.redline_seconds = 0;
+  }
+
+  // Bornes : marche 1 km ou 1 mile, course 2 km ou 2 miles.
+  if (s_selected_activity != ACTIVITY_TRAINING) {
+    int borne_m = (s_stride.units_imperial ? 1609 : 1000) *
+        ((s_selected_activity == ACTIVITY_RUN) ? 2 : 1);
+    int borne_count = get_distance_meters() / borne_m;
+
+    if (borne_count > s_journal_borne_done &&
+        s_journal.event_count < JOURNAL_MAX_EVENTS &&
+        s_journal_borne_events < JOURNAL_MAX_BORNE_EVENTS) {
+      s_journal_borne_done = borne_count;
+      journal_add_event(&s_journal, JE_BORNE,
+                        (uint16_t) s_elapsed_seconds,
+                        (uint8_t) s_journal_borne_done);
+      s_journal_borne_events++;
+    }
+  }
+
+  // Flammes : une tous les 200 kcal, seulement avec la frequence cardiaque.
+  if (s_heart_rate_available) {
+    int flame_count = get_session_calories() / 200;
+
+    if (flame_count > s_journal_flame_done &&
+        s_journal.event_count < JOURNAL_MAX_EVENTS &&
+        s_journal_flame_events < JOURNAL_MAX_FLAME_EVENTS) {
+      s_journal_flame_done = flame_count;
+      journal_add_event(&s_journal, JE_FLAME,
+                        (uint16_t) s_elapsed_seconds,
+                        (uint8_t) s_journal_flame_done);
+      s_journal_flame_events++;
+    }
+  }
+}
+
 static void workout_tick_handler(struct tm *tick_time,
                                  TimeUnits units_changed) {
   if (!s_is_paused) {
@@ -1187,6 +1264,7 @@ static void workout_tick_handler(struct tm *tick_time,
     refresh_heart_rate_if_needed();
     refresh_steps_if_needed();
     check_alerts();
+    journal_track_tick();
   }
 
   if (s_workout_layer != NULL) {
