@@ -1543,8 +1543,49 @@ static void journal_window_unload(Window *window) {
   s_journal_layer = NULL;
 }
 
+static void draw_summary_line(GContext *ctx, int16_t y,
+                              const char *value, const char *unit,
+                              const char *label, GFont value_font);
+
+static void detail_up_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  s_detail_scroll_offset -= SUMMARY_SCROLL_STEP;
+
+  if (s_detail_scroll_offset < 0) {
+    s_detail_scroll_offset = 0;
+  }
+
+  layer_mark_dirty(s_detail_layer);
+}
+
+static void detail_down_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  GRect bounds = layer_get_bounds(s_detail_layer);
+  int max_offset = s_detail_content_height - bounds.size.h;
+
+  if (max_offset < 0) {
+    max_offset = 0;
+  }
+
+  s_detail_scroll_offset += SUMMARY_SCROLL_STEP;
+
+  if (s_detail_scroll_offset > max_offset) {
+    s_detail_scroll_offset = max_offset;
+  }
+
+  layer_mark_dirty(s_detail_layer);
+}
+
 static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
+  GRect scroll_frame = GRect(
+      0, -s_detail_scroll_offset, bounds.size.w, 800);
+  JournalSession *d = &s_detail_session;
+  bool is_training = (d->activity == ACTIVITY_TRAINING);
+  GFont value_font = s_summary_font;
+  int16_t y = scroll_frame.origin.y + 44;
+  int16_t step = 72;
+  char text[32];
 
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
@@ -1552,12 +1593,111 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_text_color(ctx, GColorBlack);
   graphics_draw_text(
       ctx,
-      tr(STR_ACTIVITY_WALK + s_detail_session.activity),
-      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-      GRect(0, 4, bounds.size.w, 30),
+      tr(STR_ACTIVITY_WALK + d->activity),
+      s_summary_font,
+      GRect(6, scroll_frame.origin.y + 4, bounds.size.w - 12, 44),
       GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentCenter,
+      GTextAlignmentLeft,
       NULL);
+
+  snprintf(
+      text, sizeof(text), "%02d:%02d",
+      (int) (d->active_seconds / 60),
+      (int) (d->active_seconds % 60));
+  draw_summary_line(
+      ctx, y, text, "", tr(STR_LABEL_DURATION), value_font);
+  y += step;
+
+  snprintf(
+      text, sizeof(text), "%02d:%02d",
+      (int) (d->total_seconds / 60),
+      (int) (d->total_seconds % 60));
+  draw_summary_line(
+      ctx, y, text, "", tr(STR_SUMMARY_TOTAL_TIME), value_font);
+  y += step;
+
+  if (!is_training) {
+    uint32_t hundredths =
+        (d->distance_m * 100) / 1000;
+
+    snprintf(
+        text, sizeof(text), "%lu.%02lu",
+        (unsigned long) (hundredths / 100),
+        (unsigned long) (hundredths % 100));
+    draw_summary_line(
+        ctx, y, text, get_distance_unit(),
+        tr(STR_LABEL_DISTANCE), value_font);
+    y += step;
+
+    snprintf(text, sizeof(text), "%lu",
+             (unsigned long) d->steps);
+    draw_summary_line(
+        ctx, y, text, tr(STR_UNIT_STEPS),
+        tr(STR_LABEL_STEPS), value_font);
+    y += step;
+  }
+
+  if (d->avg_bpm > 0) {
+    snprintf(text, sizeof(text), "%d", (int) d->avg_bpm);
+    draw_summary_line(
+        ctx, y, text, "bpm", tr(STR_SUMMARY_HR_AVG), value_font);
+    y += step;
+  }
+
+  if (d->max_bpm > 0) {
+    snprintf(text, sizeof(text), "%d", (int) d->max_bpm);
+    draw_summary_line(
+        ctx, y, text, "bpm", tr(STR_SUMMARY_HR_MAX), value_font);
+    y += step;
+  }
+
+  if (d->calories > 0) {
+    snprintf(text, sizeof(text), "%d", (int) d->calories);
+    draw_summary_line(
+        ctx, y, text, "kcal", tr(STR_SUMMARY_CALORIES), value_font);
+    y += step;
+  }
+
+  if (d->feeling > 0) {
+    draw_summary_line(
+        ctx, y,
+        tr(STR_EFFORT_RELAXED + (d->feeling - 1)),
+        "", tr(STR_SUMMARY_EFFORT), value_font);
+    y += step;
+  }
+
+  if (d->level > 0) {
+    snprintf(text, sizeof(text), "%d/5", (int) d->level);
+    draw_summary_line(
+        ctx, y, text, "", tr(STR_SUMMARY_LEVEL), value_font);
+    y += step;
+  }
+
+  for (int i = 0; i < JOURNAL_ZONE_COUNT; i++) {
+    if (d->zone_seconds[i] > 0) {
+      snprintf(
+          text, sizeof(text), "%d:%02d",
+          (int) (d->zone_seconds[i] / 60),
+          (int) (d->zone_seconds[i] % 60));
+      draw_summary_line(
+          ctx, y, text, "",
+          tr(STR_WORKOUT_ZONE_1 + i), value_font);
+      y += step;
+    }
+  }
+
+  int achievement = journal_top_achievement(d->achievements);
+
+  if (achievement >= 0) {
+    snprintf(
+        text, sizeof(text), "#%d", achievement + 1);
+    draw_summary_line(
+        ctx, y, text, "",
+        tr(STR_SUMMARY_ACHIEVEMENT), value_font);
+    y += step;
+  }
+
+  s_detail_content_height = (y + 12) - scroll_frame.origin.y;
 }
 
 static void detail_back_click_handler(
@@ -1566,6 +1706,10 @@ static void detail_back_click_handler(
 }
 
 static void detail_click_config_provider(void *context) {
+  window_single_click_subscribe(
+      BUTTON_ID_UP, detail_up_click_handler);
+  window_single_click_subscribe(
+      BUTTON_ID_DOWN, detail_down_click_handler);
   window_single_click_subscribe(
       BUTTON_ID_BACK, detail_back_click_handler);
 }
