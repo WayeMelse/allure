@@ -2373,6 +2373,49 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
 
 // Score d'effort de 10 a 50 : FC moyenne (zone x 10) et effort ressenti.
 // Renvoie 0 si aucune donnee exploitable.
+static void draw_summary_separator(GContext *ctx, int16_t y) {
+  graphics_context_set_stroke_color(ctx, s_summary_value_color);
+  graphics_draw_line(ctx, GPoint(6, y + 70), GPoint(194, y + 70));
+}
+
+static void draw_summary_intensity(GContext *ctx, int16_t y, int level) {
+  const int16_t segment_width = 30;
+  const int16_t segment_height = 20;
+  const int16_t segment_gap = 4;
+  const int16_t segment_y = y + 8;
+
+  for (int i = 0; i < 5; i++) {
+    int16_t x = 6 + i * (segment_width + segment_gap);
+
+    if (i < level) {
+      graphics_context_set_fill_color(ctx, s_summary_value_color);
+      graphics_fill_rect(
+          ctx,
+          GRect(x, segment_y, segment_width, segment_height),
+          2,
+          GCornersAll);
+    } else {
+      graphics_context_set_stroke_color(ctx, s_summary_value_color);
+      graphics_draw_round_rect(
+          ctx,
+          GRect(x, segment_y, segment_width, segment_height),
+          2);
+    }
+  }
+
+  graphics_context_set_text_color(ctx, s_summary_label_color);
+  graphics_draw_text(
+      ctx,
+      tr(STR_SUMMARY_INTENSITY),
+      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      GRect(6, y + 42, 188, 22),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft,
+      NULL);
+
+  draw_summary_separator(ctx, y);
+}
+
 static int get_effort_score(void) {
   static const int rating_scores[5] = {0, 10, 25, 40, 50};
   int hr_score = 0;
@@ -2581,6 +2624,16 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
 
   int16_t y = scroll_frame.origin.y + 84;
   int16_t step = 72;
+  int achievement = journal_top_achievement(s_journal.achievements);
+
+  if (achievement >= 0) {
+    draw_summary_line(
+        ctx, y,
+        tr(STR_ACHIEVEMENT_WELCOME_BACK + achievement),
+        "", tr(STR_SUMMARY_ACHIEVEMENT), value_font);
+    draw_summary_separator(ctx, y);
+    y += step;
+  }
 
   if (s_effort_rating > 0) {
     const char *effort_text = tr(STR_EFFORT_RELAXED + (s_effort_rating - 1));
@@ -2598,8 +2651,12 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
 
     draw_summary_line(
         ctx, y, effort_text, "", tr(STR_SUMMARY_EFFORT), effort_font);
+    draw_summary_separator(ctx, y);
     y += step;
   }
+
+  draw_summary_intensity(ctx, y, (int) s_journal.level);
+  y += step;
 
 #if EFFORT_DEBUG
   {
@@ -2624,36 +2681,44 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
 #endif
 
   draw_summary_line(ctx, y, duration_text, "", tr(STR_LABEL_DURATION), value_font);
+  draw_summary_separator(ctx, y);
   y += step;
 
   if (s_selected_activity != ACTIVITY_TRAINING) {
     draw_summary_line(ctx, y, steps_text, tr(STR_UNIT_STEPS), tr(STR_LABEL_STEPS), value_font);
+    draw_summary_separator(ctx, y);
     y += step;
 
     draw_summary_line(ctx, y, distance_text, get_distance_unit(), tr(STR_LABEL_DISTANCE), value_font);
+    draw_summary_separator(ctx, y);
     y += step;
 
     draw_summary_line(ctx, y, pace_text, get_pace_unit(), tr(STR_SUMMARY_PACE), value_font);
+    draw_summary_separator(ctx, y);
     y += step;
 
     draw_summary_line(ctx, y, speed_text, get_speed_unit(), tr(STR_SUMMARY_SPEED), value_font);
+    draw_summary_separator(ctx, y);
     y += step;
   }
 
   if (!(hide_unmeasured && average_bpm <= 0)) {
     draw_summary_line(
         ctx, y, bpm_avg_text, bpm_avg_unit, tr(STR_SUMMARY_HR_AVG), bpm_font_avg);
+    draw_summary_separator(ctx, y);
     y += step;
   }
 
   if (!(hide_unmeasured && s_bpm_max <= 0)) {
     draw_summary_line(
         ctx, y, bpm_max_text, bpm_max_unit, tr(STR_SUMMARY_HR_MAX), bpm_font_max);
+    draw_summary_separator(ctx, y);
     y += step;
   }
 
   if (!(hide_unmeasured && calories <= 0)) {
     draw_summary_line(ctx, y, calories_text, "kcal", tr(STR_SUMMARY_CALORIES), value_font);
+    draw_summary_separator(ctx, y);
     y += step;
   }
 
