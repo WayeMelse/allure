@@ -189,6 +189,11 @@ static int s_detail_content_height = 0;
 static Window *s_timeline_window;
 static Layer *s_timeline_layer;
 static int s_timeline_selection = 0;
+// 1 uniquement pendant le parcours de fin de seance : la frise utilise
+// alors s_journal. Les seances historiques ne proposent pas de frise.
+static bool s_timeline_from_workout = false;
+// 1 lorsque le resume final a ete ouvert depuis la frise : Retour y revient.
+static bool s_summary_from_timeline = false;
 static Window *s_stop_confirm_window;
 static Window *s_summary_window;
 
@@ -1733,13 +1738,15 @@ static void timeline_layer_update_proc(Layer *layer, GContext *ctx) {
     COLOR_LEVEL_5
   };
 
+  const JournalSession *session = s_timeline_from_workout
+      ? &s_journal : &s_detail_session;
   static char start_text[24];
   const char *feeling_text = "";
   const char *achievement_text = "";
   GColor bar_color = GColorLightGray;
-  int achievement = journal_top_achievement(s_detail_session.achievements);
-  int feeling = (int) s_detail_session.feeling;
-  int level = (int) s_detail_session.level;
+  int achievement = journal_top_achievement(session->achievements);
+  int feeling = (int) session->feeling;
+  int level = (int) session->level;
 
   if (feeling > 0 && feeling <= 4) {
     feeling_text = tr(STR_EFFORT_RELAXED + (feeling - 1));
@@ -1753,8 +1760,8 @@ static void timeline_layer_update_proc(Layer *layer, GContext *ctx) {
     bar_color = level_colors[level - 1];
   }
 
-  if (s_detail_session.start_time > 0) {
-    time_t start_time = (time_t) s_detail_session.start_time;
+  if (session->start_time > 0) {
+    time_t start_time = (time_t) session->start_time;
     struct tm *start_tm = localtime(&start_time);
 
     strftime(
@@ -1873,6 +1880,12 @@ static void timeline_down_click_handler(
 
 static void timeline_select_click_handler(
     ClickRecognizerRef recognizer, void *context) {
+  if (s_timeline_from_workout) {
+    s_summary_from_timeline = true;
+    window_stack_push(s_summary_window, true);
+    return;
+  }
+
   window_stack_pop(true);
 }
 
@@ -2047,18 +2060,11 @@ static void detail_back_click_handler(
   window_stack_pop(true);
 }
 
-static void detail_select_click_handler(
-    ClickRecognizerRef recognizer, void *context) {
-  window_stack_push(s_timeline_window, true);
-}
-
 static void detail_click_config_provider(void *context) {
   window_single_click_subscribe(
       BUTTON_ID_UP, detail_up_click_handler);
   window_single_click_subscribe(
       BUTTON_ID_DOWN, detail_down_click_handler);
-  window_single_click_subscribe(
-      BUTTON_ID_SELECT, detail_select_click_handler);
   window_single_click_subscribe(
       BUTTON_ID_BACK, detail_back_click_handler);
 }
@@ -2467,9 +2473,10 @@ static void stop_confirm_select_click_handler(ClickRecognizerRef recognizer,
   s_effort_rating = s_effort_choice;
   journal_session_save();
   tick_timer_service_unsubscribe();
+  s_timeline_from_workout = true;
   window_stack_pop(true);
   window_stack_pop(true);
-  window_stack_push(s_summary_window, true);
+  window_stack_push(s_timeline_window, true);
 }
 
 static void stop_confirm_back_click_handler(ClickRecognizerRef recognizer,
@@ -2949,19 +2956,31 @@ static void summary_down_click_handler(ClickRecognizerRef recognizer,
 
 static void summary_select_click_handler(ClickRecognizerRef recognizer,
                                          void *context) {
-  // Le menu est la premiere fenetre poussee dans init() et reste toujours
-  // au fond de la pile : on depile donc tout le reste pour y revenir,
-  // sans jamais fermer l'application.
+  // Le bouton central clot le parcours et revient toujours au menu.
+  s_summary_from_timeline = false;
+  s_timeline_from_workout = false;
+
   while (window_stack_get_top_window() != s_menu_window) {
     window_stack_pop(true);
   }
+}
+
+static void summary_back_click_handler(ClickRecognizerRef recognizer,
+                                       void *context) {
+  if (s_summary_from_timeline) {
+    s_summary_from_timeline = false;
+    window_stack_pop(true);
+    return;
+  }
+
+  summary_select_click_handler(recognizer, context);
 }
 
 static void summary_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, summary_up_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, summary_down_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, summary_select_click_handler);
-  window_single_click_subscribe(BUTTON_ID_BACK, summary_select_click_handler);
+  window_single_click_subscribe(BUTTON_ID_BACK, summary_back_click_handler);
 }
 
 static void summary_window_load(Window *window) {
