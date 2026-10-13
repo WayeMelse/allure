@@ -69,6 +69,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_VETERAN]          = "Veteran",
     [STR_LABEL_DATE]       = "DATE",
     [STR_SUMMARY_INTENSITY]       = "INTENSITY",
+    [STR_TIMELINE_SUMMARY]        = "SUMMARY",
+    [STR_TIMELINE_START]          = "START",
   },
   [LANGUAGE_FR] = {
     [STR_ACTIVITY_WALK]      = "Marche",
@@ -121,6 +123,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_VETERAN]          = "Vétéran",
     [STR_LABEL_DATE]       = "DATE",
     [STR_SUMMARY_INTENSITY]       = "INTENSITÉ",
+    [STR_TIMELINE_SUMMARY]        = "RÉSUMÉ",
+    [STR_TIMELINE_START]          = "DÉBUT",
   },
   [LANGUAGE_DE] = {
     [STR_ACTIVITY_WALK]      = "Gehen",
@@ -173,6 +177,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_VETERAN]          = "Veteran",
     [STR_LABEL_DATE]       = "DATUM",
     [STR_SUMMARY_INTENSITY]       = "INTENSITÄT",
+    [STR_TIMELINE_SUMMARY]        = "ÜBERSICHT",
+    [STR_TIMELINE_START]          = "START",
   },
   [LANGUAGE_ES] = {
     [STR_ACTIVITY_WALK]      = "Caminar",
@@ -225,6 +231,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_VETERAN]          = "Veterano",
     [STR_LABEL_DATE]       = "FECHA",
     [STR_SUMMARY_INTENSITY]       = "INTENSIDAD",
+    [STR_TIMELINE_SUMMARY]        = "RESUMEN",
+    [STR_TIMELINE_START]          = "INICIO",
   },
   [LANGUAGE_IT] = {
     [STR_ACTIVITY_WALK]      = "Camminata",
@@ -277,6 +285,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_VETERAN]          = "Veterano",
     [STR_LABEL_DATE]       = "DATA",
     [STR_SUMMARY_INTENSITY]       = "INTENSITÀ",
+    [STR_TIMELINE_SUMMARY]        = "RIEPILOGO",
+    [STR_TIMELINE_START]          = "INIZIO",
   },
   [LANGUAGE_PT] = {
     [STR_ACTIVITY_WALK]      = "Caminhada",
@@ -329,6 +339,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_VETERAN]          = "Veterano",
     [STR_LABEL_DATE]       = "DATA",
     [STR_SUMMARY_INTENSITY]       = "INTENSIDADE",
+    [STR_TIMELINE_SUMMARY]        = "RESUMO",
+    [STR_TIMELINE_START]          = "INÍCIO",
   },
 };
 

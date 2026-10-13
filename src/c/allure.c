@@ -185,6 +185,10 @@ static Layer *s_detail_layer;
 static JournalSession s_detail_session;
 static int s_detail_scroll_offset = 0;
 static int s_detail_content_height = 0;
+
+static Window *s_timeline_window;
+static Layer *s_timeline_layer;
+static int s_timeline_selection = 0;
 static Window *s_stop_confirm_window;
 static Window *s_summary_window;
 
@@ -1714,6 +1718,188 @@ static void draw_detail_intensity(GContext *ctx, int16_t y, int level) {
   graphics_draw_line(ctx, GPoint(6, y + 70), GPoint(194, y + 70));
 }
 
+static void timeline_layer_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  const int16_t bar_width = 30;
+  const int16_t content_width = bounds.size.w - bar_width;
+  const int16_t block_height = 62;
+  const int16_t first_block_y = 36;
+
+  static const GColor level_colors[5] = {
+    COLOR_LEVEL_1,
+    COLOR_LEVEL_2,
+    COLOR_LEVEL_3,
+    COLOR_LEVEL_4,
+    COLOR_LEVEL_5
+  };
+
+  static char start_text[24];
+  const char *feeling_text = "";
+  const char *achievement_text = "";
+  GColor bar_color = GColorLightGray;
+  int achievement = journal_top_achievement(s_detail_session.achievements);
+  int feeling = (int) s_detail_session.feeling;
+  int level = (int) s_detail_session.level;
+
+  if (feeling > 0 && feeling <= 4) {
+    feeling_text = tr(STR_EFFORT_RELAXED + (feeling - 1));
+  }
+
+  if (achievement >= 0) {
+    achievement_text = tr(STR_ACHIEVEMENT_WELCOME_BACK + achievement);
+  }
+
+  if (level >= 1 && level <= 5) {
+    bar_color = level_colors[level - 1];
+  }
+
+  if (s_detail_session.start_time > 0) {
+    time_t start_time = (time_t) s_detail_session.start_time;
+    struct tm *start_tm = localtime(&start_time);
+
+    strftime(
+        start_text,
+        sizeof(start_text),
+        "%H:%M",
+        start_tm);
+  } else {
+    start_text[0] = '\0';
+  }
+
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
+  graphics_context_set_fill_color(ctx, bar_color);
+  graphics_fill_rect(
+      ctx,
+      GRect(content_width, 0, bar_width, bounds.size.h),
+      0,
+      GCornerNone);
+
+  graphics_context_set_fill_color(ctx, bar_color);
+  graphics_fill_rect(
+      ctx,
+      GRect(0, 0, content_width, 34),
+      0,
+      GCornerNone);
+
+  graphics_context_set_text_color(
+      ctx, get_text_color_for_background(bar_color));
+  graphics_draw_text(
+      ctx,
+      tr(STR_TIMELINE_SUMMARY),
+      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      GRect(0, 0, content_width, 28),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentCenter,
+      NULL);
+
+  const char *titles[3] = {
+    feeling_text,
+    achievement_text,
+    start_text
+  };
+  const char *labels[3] = {
+    tr(STR_SUMMARY_EFFORT),
+    tr(STR_SUMMARY_ACHIEVEMENT),
+    tr(STR_TIMELINE_START)
+  };
+  const char *details[3] = {
+    "",
+    "",
+    ""
+  };
+
+  for (int i = 0; i < 3; i++) {
+    int16_t y = first_block_y + (i - s_timeline_selection) * block_height;
+
+    if (y < 30 || y >= bounds.size.h) {
+      continue;
+    }
+
+    graphics_context_set_text_color(ctx, GColorBlack);
+    graphics_draw_text(
+        ctx,
+        titles[i],
+        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+        GRect(6, y, content_width - 12, 28),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft,
+        NULL);
+
+    graphics_draw_text(
+        ctx,
+        labels[i],
+        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+        GRect(6, y + 27, content_width - 12, 20),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft,
+        NULL);
+
+    if (details[i][0] != '\0') {
+      graphics_draw_text(
+          ctx,
+          details[i],
+          fonts_get_system_font(FONT_KEY_GOTHIC_14),
+          GRect(6, y + 46, content_width - 12, 16),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft,
+          NULL);
+    }
+
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_circle(
+        ctx,
+        GPoint(content_width + bar_width / 2, y + 22),
+        7);
+  }
+}
+
+static void timeline_up_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  if (s_timeline_selection > 0) {
+    s_timeline_selection--;
+    layer_mark_dirty(s_timeline_layer);
+  }
+}
+
+static void timeline_down_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  if (s_timeline_selection < 2) {
+    s_timeline_selection++;
+    layer_mark_dirty(s_timeline_layer);
+  }
+}
+
+static void timeline_select_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  window_stack_pop(true);
+}
+
+static void timeline_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_UP, timeline_up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, timeline_down_click_handler);
+  window_single_click_subscribe(
+      BUTTON_ID_SELECT, timeline_select_click_handler);
+}
+
+static void timeline_window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+
+  window_set_background_color(window, GColorWhite);
+  s_timeline_selection = 0;
+
+  s_timeline_layer = layer_create(bounds);
+  layer_set_update_proc(s_timeline_layer, timeline_layer_update_proc);
+  layer_add_child(window_layer, s_timeline_layer);
+}
+
+static void timeline_window_unload(Window *window) {
+  layer_destroy(s_timeline_layer);
+  s_timeline_layer = NULL;
+}
+
 static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   GRect scroll_frame = GRect(
@@ -1861,11 +2047,18 @@ static void detail_back_click_handler(
   window_stack_pop(true);
 }
 
+static void detail_select_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  window_stack_push(s_timeline_window, true);
+}
+
 static void detail_click_config_provider(void *context) {
   window_single_click_subscribe(
       BUTTON_ID_UP, detail_up_click_handler);
   window_single_click_subscribe(
       BUTTON_ID_DOWN, detail_down_click_handler);
+  window_single_click_subscribe(
+      BUTTON_ID_SELECT, detail_select_click_handler);
   window_single_click_subscribe(
       BUTTON_ID_BACK, detail_back_click_handler);
 }
@@ -3161,6 +3354,17 @@ static void init(void) {
           .unload = detail_window_unload,
       });
 
+  s_timeline_window = window_create();
+  window_set_click_config_provider(
+      s_timeline_window,
+      timeline_click_config_provider);
+  window_set_window_handlers(
+      s_timeline_window,
+      (WindowHandlers) {
+          .load = timeline_window_load,
+          .unload = timeline_window_unload,
+      });
+
   s_summary_window = window_create();
   window_set_click_config_provider(
       s_summary_window,
@@ -3184,6 +3388,8 @@ static void deinit(void) {
   tick_timer_service_unsubscribe();
 
   window_destroy(s_summary_window);
+  window_destroy(s_timeline_window);
+  window_destroy(s_detail_window);
   window_destroy(s_stop_confirm_window);
   window_destroy(s_workout_window);
   window_destroy(s_countdown_window);
