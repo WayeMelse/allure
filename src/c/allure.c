@@ -177,6 +177,7 @@ static Window *s_journal_window;
 static Layer *s_journal_layer;
 static int s_menu_selection = 0;
 static int s_journal_selection = 0;
+static int s_journal_first_visible = 0;
 static int s_journal_count = 0;
 static JournalSession s_journal_list[JOURNAL_SLOTS];
 static Window *s_detail_window;
@@ -1401,8 +1402,8 @@ static void menu_window_unload(Window *window) {
 
 static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
-  const int16_t row_height = 44;
-  const int16_t first_row_y = 40;
+  const int16_t row_height = 58;
+  const int16_t first_row_y = 36;
 
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
@@ -1429,29 +1430,72 @@ static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
     return;
   }
 
-  for (int i = 0; i < s_journal_count; i++) {
-    int16_t row_y = first_row_y + i * row_height;
+  int visible_rows = (bounds.size.h - first_row_y) / row_height;
+  if (visible_rows < 1) {
+    visible_rows = 1;
+  }
+
+  if (s_journal_selection < s_journal_first_visible) {
+    s_journal_first_visible = s_journal_selection;
+  } else if (s_journal_selection >=
+             s_journal_first_visible + visible_rows) {
+    s_journal_first_visible = s_journal_selection - visible_rows + 1;
+  }
+
+  int max_first = s_journal_count - visible_rows;
+  if (max_first < 0) {
+    max_first = 0;
+  }
+  if (s_journal_first_visible > max_first) {
+    s_journal_first_visible = max_first;
+  }
+  if (s_journal_first_visible < 0) {
+    s_journal_first_visible = 0;
+  }
+
+  int last_visible = s_journal_first_visible + visible_rows;
+  if (last_visible > s_journal_count) {
+    last_visible = s_journal_count;
+  }
+
+  for (int i = s_journal_first_visible; i < last_visible; i++) {
+    int16_t row_y =
+        first_row_y + (i - s_journal_first_visible) * row_height;
     bool selected = (i == s_journal_selection);
     char duration_text[16];
+    char date_text[20];
+    time_t start_time = (time_t) s_journal_list[i].start_time;
+    struct tm *start_tm = localtime(&start_time);
 
     if (selected) {
       graphics_context_set_fill_color(ctx, ACCENT_YELLOW);
       graphics_fill_rect(
           ctx,
-          GRect(0, row_y, bounds.size.w, row_height),
-          0,
-          GCornerNone);
+          GRect(4, row_y + 2, bounds.size.w - 8, row_height - 4),
+          4,
+          GCornersAll);
     }
 
     snprintf(duration_text, sizeof(duration_text), "%d min",
              (int) (s_journal_list[i].active_seconds / 60));
 
+    if (start_tm != NULL) {
+      snprintf(
+          date_text, sizeof(date_text), "%02d/%02d · %02d:%02d",
+          start_tm->tm_mday,
+          start_tm->tm_mon + 1,
+          start_tm->tm_hour,
+          start_tm->tm_min);
+    } else {
+      snprintf(date_text, sizeof(date_text), "--/-- · --:--");
+    }
+
     graphics_context_set_text_color(ctx, GColorBlack);
     graphics_draw_text(
         ctx,
         tr(STR_ACTIVITY_WALK + s_journal_list[i].activity),
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(8, row_y + 4, 120, 22),
+        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+        GRect(12, row_y + 2, 118, 28),
         GTextOverflowModeTrailingEllipsis,
         GTextAlignmentLeft,
         NULL);
@@ -1459,10 +1503,20 @@ static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_draw_text(
         ctx,
         duration_text,
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(bounds.size.w - 78, row_y + 4, 70, 22),
+        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+        GRect(bounds.size.w - 88, row_y + 2, 76, 28),
         GTextOverflowModeTrailingEllipsis,
         GTextAlignmentRight,
+        NULL);
+
+    graphics_context_set_text_color(ctx, GColorBlack);
+    graphics_draw_text(
+        ctx,
+        date_text,
+        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+        GRect(12, row_y + 31, bounds.size.w - 24, 22),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft,
         NULL);
   }
 }
@@ -1576,6 +1630,90 @@ static void detail_down_click_handler(
   layer_mark_dirty(s_detail_layer);
 }
 
+static void draw_detail_line(GContext *ctx, int16_t y,
+                             const char *value, const char *unit,
+                             const char *label, GFont value_font) {
+  GSize value_size = graphics_text_layout_get_content_size(
+      value,
+      value_font,
+      GRect(0, 0, 400, 50),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft);
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(
+      ctx,
+      value,
+      value_font,
+      GRect(6, y, 188, 44),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft,
+      NULL);
+
+  if (unit[0] != '\0') {
+    graphics_draw_text(
+        ctx,
+        unit,
+        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+        GRect(6 + value_size.w + 6, y + SUMMARY_UNIT_Y_OFFSET, 110, 34),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft,
+        NULL);
+  }
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(
+      ctx,
+      label,
+      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      GRect(6, y + 42, 188, 22),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft,
+      NULL);
+
+  graphics_context_set_stroke_color(ctx, GColorLightGray);
+  graphics_draw_line(ctx, GPoint(6, y + 70), GPoint(194, y + 70));
+}
+
+static void draw_detail_intensity(GContext *ctx, int16_t y, int level) {
+  const GColor segment_colors[5] = {
+    COLOR_LEVEL_1,
+    COLOR_LEVEL_2,
+    COLOR_LEVEL_3,
+    COLOR_LEVEL_4,
+    COLOR_LEVEL_5
+  };
+  const int16_t segment_width = 30;
+  const int16_t segment_height = 20;
+  const int16_t segment_gap = 4;
+  const int16_t segment_y = y + 8;
+
+  for (int i = 0; i < 5; i++) {
+    int16_t x = 6 + i * (segment_width + segment_gap);
+
+    graphics_context_set_fill_color(
+        ctx, (i < level) ? segment_colors[i] : GColorLightGray);
+    graphics_fill_rect(
+        ctx,
+        GRect(x, segment_y, segment_width, segment_height),
+        2,
+        GCornersAll);
+  }
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(
+      ctx,
+      tr(STR_SUMMARY_INTENSITY),
+      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      GRect(6, y + 42, 188, 22),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft,
+      NULL);
+
+  graphics_context_set_stroke_color(ctx, GColorLightGray);
+  graphics_draw_line(ctx, GPoint(6, y + 70), GPoint(194, y + 70));
+}
+
 static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   GRect scroll_frame = GRect(
@@ -1586,6 +1724,22 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   int16_t y = scroll_frame.origin.y + 44;
   int16_t step = 72;
   char text[32];
+  char date_text[24];
+  time_t start_time = (time_t) d->start_time;
+  struct tm *start_tm = localtime(&start_time);
+
+  if (start_tm != NULL) {
+    snprintf(
+        date_text, sizeof(date_text), "%02d/%02d · %02d:%02d",
+        start_tm->tm_mday,
+        start_tm->tm_mon + 1,
+        start_tm->tm_hour,
+        start_tm->tm_min);
+  } else {
+    snprintf(date_text, sizeof(date_text), "--/-- --:--");
+  }
+
+
 
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
@@ -1604,7 +1758,12 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
       text, sizeof(text), "%02d:%02d",
       (int) (d->active_seconds / 60),
       (int) (d->active_seconds % 60));
-  draw_summary_line(
+  draw_detail_line(
+      ctx, y, date_text, "", tr(STR_LABEL_DATE),
+      fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+  y += step;
+
+  draw_detail_line(
       ctx, y, text, "", tr(STR_LABEL_DURATION), value_font);
   y += step;
 
@@ -1612,7 +1771,7 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
       text, sizeof(text), "%02d:%02d",
       (int) (d->total_seconds / 60),
       (int) (d->total_seconds % 60));
-  draw_summary_line(
+  draw_detail_line(
       ctx, y, text, "", tr(STR_SUMMARY_TOTAL_TIME), value_font);
   y += step;
 
@@ -1624,14 +1783,14 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
         text, sizeof(text), "%lu.%02lu",
         (unsigned long) (hundredths / 100),
         (unsigned long) (hundredths % 100));
-    draw_summary_line(
+    draw_detail_line(
         ctx, y, text, get_distance_unit(),
         tr(STR_LABEL_DISTANCE), value_font);
     y += step;
 
     snprintf(text, sizeof(text), "%lu",
              (unsigned long) d->steps);
-    draw_summary_line(
+    draw_detail_line(
         ctx, y, text, tr(STR_UNIT_STEPS),
         tr(STR_LABEL_STEPS), value_font);
     y += step;
@@ -1639,27 +1798,27 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
 
   if (d->avg_bpm > 0) {
     snprintf(text, sizeof(text), "%d", (int) d->avg_bpm);
-    draw_summary_line(
+    draw_detail_line(
         ctx, y, text, "bpm", tr(STR_SUMMARY_HR_AVG), value_font);
     y += step;
   }
 
   if (d->max_bpm > 0) {
     snprintf(text, sizeof(text), "%d", (int) d->max_bpm);
-    draw_summary_line(
+    draw_detail_line(
         ctx, y, text, "bpm", tr(STR_SUMMARY_HR_MAX), value_font);
     y += step;
   }
 
   if (d->calories > 0) {
     snprintf(text, sizeof(text), "%d", (int) d->calories);
-    draw_summary_line(
+    draw_detail_line(
         ctx, y, text, "kcal", tr(STR_SUMMARY_CALORIES), value_font);
     y += step;
   }
 
   if (d->feeling > 0) {
-    draw_summary_line(
+    draw_detail_line(
         ctx, y,
         tr(STR_EFFORT_RELAXED + (d->feeling - 1)),
         "", tr(STR_SUMMARY_EFFORT), value_font);
@@ -1667,9 +1826,7 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   }
 
   if (d->level > 0) {
-    snprintf(text, sizeof(text), "%d/5", (int) d->level);
-    draw_summary_line(
-        ctx, y, text, "", tr(STR_SUMMARY_LEVEL), value_font);
+    draw_detail_intensity(ctx, y, (int) d->level);
     y += step;
   }
 
@@ -1679,7 +1836,7 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
           text, sizeof(text), "%d:%02d",
           (int) (d->zone_seconds[i] / 60),
           (int) (d->zone_seconds[i] % 60));
-      draw_summary_line(
+      draw_detail_line(
           ctx, y, text, "",
           tr(STR_WORKOUT_ZONE_1 + i), value_font);
       y += step;
@@ -1689,7 +1846,7 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   int achievement = journal_top_achievement(d->achievements);
 
   if (achievement >= 0) {
-    draw_summary_line(
+    draw_detail_line(
         ctx, y,
         tr(STR_ACHIEVEMENT_WELCOME_BACK + achievement),
         "", tr(STR_SUMMARY_ACHIEVEMENT), value_font);

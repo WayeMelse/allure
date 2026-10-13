@@ -67,6 +67,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_ONE_MONTH]        = "One month",
     [STR_ACHIEVEMENT_LOYAL]            = "Loyal",
     [STR_ACHIEVEMENT_VETERAN]          = "Veteran",
+    [STR_LABEL_DATE]       = "DATE",
+    [STR_SUMMARY_INTENSITY]       = "INTENSITY",
   },
   [LANGUAGE_FR] = {
     [STR_ACTIVITY_WALK]      = "Marche",
@@ -117,6 +119,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_ONE_MONTH]        = "Un mois",
     [STR_ACHIEVEMENT_LOYAL]            = "Fidèle",
     [STR_ACHIEVEMENT_VETERAN]          = "Vétéran",
+    [STR_LABEL_DATE]       = "DATE",
+    [STR_SUMMARY_INTENSITY]       = "INTENSITÉ",
   },
   [LANGUAGE_DE] = {
     [STR_ACTIVITY_WALK]      = "Gehen",
@@ -167,6 +171,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_ONE_MONTH]        = "Ein Monat",
     [STR_ACHIEVEMENT_LOYAL]            = "Treu",
     [STR_ACHIEVEMENT_VETERAN]          = "Veteran",
+    [STR_LABEL_DATE]       = "DATUM",
+    [STR_SUMMARY_INTENSITY]       = "INTENSITÄT",
   },
   [LANGUAGE_ES] = {
     [STR_ACTIVITY_WALK]      = "Caminar",
@@ -217,6 +223,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_ONE_MONTH]        = "Un mes",
     [STR_ACHIEVEMENT_LOYAL]            = "Leal",
     [STR_ACHIEVEMENT_VETERAN]          = "Veterano",
+    [STR_LABEL_DATE]       = "FECHA",
+    [STR_SUMMARY_INTENSITY]       = "INTENSIDAD",
   },
   [LANGUAGE_IT] = {
     [STR_ACTIVITY_WALK]      = "Camminata",
@@ -267,6 +275,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_ONE_MONTH]        = "Un mese",
     [STR_ACHIEVEMENT_LOYAL]            = "Fedele",
     [STR_ACHIEVEMENT_VETERAN]          = "Veterano",
+    [STR_LABEL_DATE]       = "DATA",
+    [STR_SUMMARY_INTENSITY]       = "INTENSITÀ",
   },
   [LANGUAGE_PT] = {
     [STR_ACTIVITY_WALK]      = "Caminhada",
@@ -317,6 +327,8 @@ static const char *const s_strings[LANGUAGE_COUNT][STR_COUNT] = {
     [STR_ACHIEVEMENT_ONE_MONTH]        = "Um mês",
     [STR_ACHIEVEMENT_LOYAL]            = "Fiel",
     [STR_ACHIEVEMENT_VETERAN]          = "Veterano",
+    [STR_LABEL_DATE]       = "DATA",
+    [STR_SUMMARY_INTENSITY]       = "INTENSIDADE",
   },
 };
 
