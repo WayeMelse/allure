@@ -7,10 +7,15 @@ static const int s_max_percents[3][4] = {
   {53, 64, 75, 86}, {60, 70, 80, 90}, {60, 70, 80, 90}
 };
 
-// Pourcentages de la reserve cardiaque (Karvonen), calibres pour retrouver
-// les zones ci-dessus avec une frequence de repos de 60 bpm.
-static const int s_reserve_percents[3][4] = {
-  {30, 46, 63, 79}, {40, 55, 70, 85}, {40, 55, 70, 85}
+// Calibration Allure sur la reserve cardiaque (formule de Karvonen).
+// Valeurs en milliemes : calculs entiers uniquement.
+// Marche : 15 / 35 / 55 / 75 %.
+// Course et entrainement : 30 / 47,3 / 64,7 / 82 %.
+// Limites intermediaires reparties regulierement, a l'arrondi pres.
+static const int s_reserve_permille[3][4] = {
+  {150, 350, 550, 750},
+  {300, 473, 647, 820},
+  {300, 473, 647, 820}
 };
 
 int zones_upper_limit_bpm(int activity, int zone, int max_bpm,
@@ -27,7 +32,7 @@ int zones_upper_limit_bpm(int activity, int zone, int max_bpm,
 
   if (resting_hr > 0 && max_bpm - resting_hr >= ZONES_MIN_RESERVE_BPM) {
     return resting_hr +
-           ((max_bpm - resting_hr) * s_reserve_percents[activity][zone]) / 100;
+           ((max_bpm - resting_hr) * s_reserve_permille[activity][zone]) / 1000;
   }
 
   return (max_bpm * s_max_percents[activity][zone]) / 100;

@@ -12,3 +12,7 @@ void step_counter_start(StepCounter *counter, int total_today);
 
 // Renvoie les pas de la seance.
 int step_counter_update(StepCounter *counter, int total_today);
+
+// Conserve les pas deja acquis et ignore les pas depuis la derniere lecture.
+// A appeler a la reprise, apres une lecture normale a l'entree en pause.
+void step_counter_rebase(StepCounter *counter, int total_today);

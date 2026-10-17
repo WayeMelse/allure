@@ -12,14 +12,14 @@ static void check(int activity, int rest, const int expected[4]) {
 int main(void) {
   static const int walk_none[4] = {96, 117, 137, 157};
   static const int run_none[4] = {109, 128, 146, 164};
-  static const int walk_50[4] = {89, 111, 133, 155};
-  static const int run_50[4] = {103, 123, 143, 163};
-  static const int walk_60[4] = {96, 116, 137, 157};
-  static const int run_60[4] = {109, 127, 146, 164};
-  static const int walk_70[4] = {103, 121, 141, 159};
-  static const int run_70[4] = {115, 132, 149, 166};
-  static const int walk_80[4] = {110, 127, 144, 161};
-  static const int run_80[4] = {121, 136, 152, 167};
+  static const int walk_50[4] = {69, 96, 123, 149};
+  static const int run_50[4] = {89, 112, 136, 159};
+  static const int walk_60[4] = {78, 103, 127, 152};
+  static const int run_60[4] = {96, 118, 139, 160};
+  static const int walk_70[4] = {86, 109, 132, 154};
+  static const int run_70[4] = {103, 123, 143, 162};
+  static const int walk_80[4] = {95, 116, 136, 157};
+  static const int run_80[4] = {110, 128, 146, 164};
 
   check(0, 0, walk_none);
   check(1, 0, run_none);
@@ -35,7 +35,7 @@ int main(void) {
   check(1, 80, run_80);
 
   check(0, 150, walk_none);  // reserve de 33 bpm : retour a la methode actuelle
-  assert(zones_upper_limit_bpm(1, 0, 183, 143) == 143 + 40 * 40 / 100);
+  assert(zones_upper_limit_bpm(1, 0, 183, 143) == 143 + 30 * 40 / 100);
 
   printf("OK : zones\n");
   return 0;

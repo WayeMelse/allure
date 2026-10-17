@@ -23,3 +23,16 @@ int step_counter_update(StepCounter *counter, int total_today) {
   counter->last_total = total_today;
   return counter->banked + total_today - counter->start_total;
 }
+
+void step_counter_rebase(StepCounter *counter, int total_today) {
+  int preserved =
+      counter->banked + counter->last_total - counter->start_total;
+
+  if (total_today < 0) {
+    total_today = 0;
+  }
+
+  counter->banked = preserved;
+  counter->start_total = total_today;
+  counter->last_total = total_today;
+}

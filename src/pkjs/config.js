@@ -74,6 +74,17 @@ var ALERT_TEXTS = {
 };
 var ta = ALERT_TEXTS[language] || ALERT_TEXTS.en;
 
+var VIBRATION_TEXTS = {
+  en: { label: 'Alert vibrations', low: 'Discreet', normal: 'Normal', high: 'Reinforced' },
+  fr: { label: 'Vibrations des alertes', low: 'Discr\u00e8tes', normal: 'Normales', high: 'Renforc\u00e9es' },
+  de: { label: 'Hinweisvibrationen', low: 'Dezent', normal: 'Normal', high: 'Verst\u00e4rkt' },
+  es: { label: 'Vibraciones de los avisos', low: 'Discretas', normal: 'Normales', high: 'Reforzadas' },
+  it: { label: 'Vibrazioni degli avvisi', low: 'Discrete', normal: 'Normali', high: 'Rinforzate' },
+  pt: { label: 'Vibra\u00e7\u00f5es dos alertas', low: 'Discretas', normal: 'Normais', high: 'Refor\u00e7adas' }
+};
+var tv = VIBRATION_TEXTS[language] || VIBRATION_TEXTS.en;
+
+
 var RESTING_TEXTS = {
   en: { on: 'Use my resting heart rate', rate: 'Resting heart rate (bpm)', hint: 'Optional. When on, heart-rate zones use your heart-rate reserve (Karvonen method). Measure it at rest, for example just after waking up.' },
   fr: { on: 'Utiliser ma fr\u00e9quence cardiaque au repos', rate: 'FC au repos (bpm)', hint: 'Facultatif. Si l\u2019option est activ\u00e9e, les zones cardiaques utilisent votre r\u00e9serve cardiaque (m\u00e9thode de Karvonen). Mesurez-la au repos, par exemple au r\u00e9veil.' },
@@ -150,6 +161,18 @@ module.exports = [
     "type": "section",
     "items": [
       { "type": "heading", "defaultValue": ta.title },
+      {
+        "type": "select",
+        "messageKey": "VibrationLevel",
+        "label": tv.label,
+        "defaultValue": "1",
+        "serializeValueAs": "integer",
+        "options": [
+          { "label": tv.low, "value": "0" },
+          { "label": tv.normal, "value": "1" },
+          { "label": tv.high, "value": "2" }
+        ]
+      },
       { "type": "toggle", "messageKey": "VibrateKm", "label": ta.vibKm,
         "defaultValue": false },
       { "type": "toggle", "messageKey": "VibrateZone", "label": ta.vibZone,
@@ -181,22 +204,29 @@ module.exports = [
           { "label": t.female, "value": "0" }
         ]
       },
-      { "type": "slider", "messageKey": "Age", "label": t.age,
-        "defaultValue": 35, "min": 10, "max": 100, "step": 1 },
-      { "type": "slider", "messageKey": "Height", "label": t.height,
-        "defaultValue": 175, "min": 120, "max": 230, "step": 1 },
-      { "type": "slider", "messageKey": "HeightFt", "label": heightFt,
-        "defaultValue": 5, "min": 4, "max": 7, "step": 1 },
-      { "type": "slider", "messageKey": "HeightIn", "label": heightIn,
-        "defaultValue": 9, "min": 0, "max": 11, "step": 1 },
-      { "type": "slider", "messageKey": "Weight", "label": t.weight,
-        "defaultValue": 75, "min": 30, "max": 250, "step": 1 },
-      { "type": "slider", "messageKey": "WeightLb", "label": weightLb,
-        "defaultValue": 165, "min": 66, "max": 550, "step": 1 },
+      { "type": "input", "messageKey": "Age", "label": t.age,
+        "defaultValue": 35, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 10, "max": 100, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "Height", "label": t.height,
+        "defaultValue": 175, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 120, "max": 230, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "HeightFt", "label": heightFt,
+        "defaultValue": 5, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 4, "max": 7, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "HeightIn", "label": heightIn,
+        "defaultValue": 9, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 0, "max": 11, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "Weight", "label": t.weight,
+        "defaultValue": 75, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 30, "max": 250, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "WeightLb", "label": weightLb,
+        "defaultValue": 165, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 66, "max": 550, "step": 1, "required": true } },
       { "type": "toggle", "messageKey": "RestingHrOn", "label": trh.on,
         "defaultValue": false },
-      { "type": "slider", "messageKey": "RestingHr", "label": trh.rate,
-        "defaultValue": 60, "min": 35, "max": 110, "step": 1 },
+      { "type": "input", "messageKey": "RestingHr", "label": trh.rate,
+        "defaultValue": 60, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 35, "max": 110, "step": 1, "required": true } },
       { "type": "text", "defaultValue": trh.hint }
     ]
   },
@@ -207,30 +237,38 @@ module.exports = [
       { "type": "text", "defaultValue": t.strideHint },
       { "type": "toggle", "messageKey": "StrideWalkOn", "label": t.walkSwitch,
         "defaultValue": false },
-      { "type": "slider", "messageKey": "StrideWalk", "label": t.strideWalk,
-        "defaultValue": 70, "min": 30, "max": 100, "step": 1 },
-      { "type": "slider", "messageKey": "StrideWalkInch", "label": walkInch,
-        "defaultValue": 28, "min": 12, "max": 39, "step": 1 },
+      { "type": "input", "messageKey": "StrideWalk", "label": t.strideWalk,
+        "defaultValue": 70, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 30, "max": 100, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "StrideWalkInch", "label": walkInch,
+        "defaultValue": 28, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 12, "max": 39, "step": 1, "required": true } },
       { "type": "toggle", "messageKey": "StrideRunOn", "label": t.runSwitch,
         "defaultValue": false },
-      { "type": "slider", "messageKey": "StrideRun", "label": t.strideRun,
-        "defaultValue": 100, "min": 40, "max": 160, "step": 1 },
-      { "type": "slider", "messageKey": "StrideRunInch", "label": runInch,
-        "defaultValue": 39, "min": 16, "max": 63, "step": 1 }
+      { "type": "input", "messageKey": "StrideRun", "label": t.strideRun,
+        "defaultValue": 100, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 40, "max": 160, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "StrideRunInch", "label": runInch,
+        "defaultValue": 39, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 16, "max": 63, "step": 1, "required": true } }
     ]
   },
   {
     "type": "section",
     "items": [
       { "type": "heading", "defaultValue": tg.title },
-      { "type": "slider", "messageKey": "GoalSessionSteps", "label": tg.steps,
-        "defaultValue": 0, "min": 0, "max": 30000, "step": 500 },
-      { "type": "slider", "messageKey": "GoalSessionDistanceKm", "label": tg.dist,
-        "defaultValue": 0, "min": 0, "max": 50, "step": 1 },
-      { "type": "slider", "messageKey": "GoalWeekDistanceKm", "label": tg.weekDist,
-        "defaultValue": 50, "min": 0, "max": 200, "step": 5 },
-      { "type": "slider", "messageKey": "GoalWeekSessions", "label": tg.weekSessions,
-        "defaultValue": 0, "min": 0, "max": 14, "step": 1 },
+      { "type": "input", "messageKey": "GoalSessionSteps", "label": tg.steps,
+        "defaultValue": 0, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 0, "max": 30000, "step": 500, "required": true } },
+      { "type": "input", "messageKey": "GoalSessionDistanceKm", "label": tg.dist,
+        "defaultValue": 0, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 0, "max": 50, "step": 1, "required": true } },
+      { "type": "input", "messageKey": "GoalWeekDistanceKm", "label": tg.weekDist,
+        "defaultValue": 50, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 0, "max": 200, "step": 5, "required": true } },
+      { "type": "input", "messageKey": "GoalWeekSessions", "label": tg.weekSessions,
+        "defaultValue": 0, "serializeValueAs": "integer",
+        "attributes": { "type": "number", "min": 0, "max": 14, "step": 1, "required": true } },
       { "type": "text", "defaultValue": tg.hint }
     ]
   },

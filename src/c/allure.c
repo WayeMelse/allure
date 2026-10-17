@@ -1,5 +1,6 @@
 #include <pebble.h>
 #include <stdlib.h>
+#include <string.h>
 #include "i18n.h"
 #include "steps.h"
 #include "achievements.h"
@@ -8,6 +9,11 @@
 #include "zones.h"
 
 static int get_effort_score(void);
+static void timeline_format_clock(time_t timestamp,
+                                  char *buffer, size_t size);
+static void detail_cancel_scroll_animation(void);
+static void session_return_to_menu(void);
+
 
 typedef enum {
   ACTIVITY_WALK = 0,
@@ -23,7 +29,9 @@ typedef enum {
   METRIC_STEPS,
   METRIC_DISTANCE,
   METRIC_HEART_RATE,
+  METRIC_HEART_RATE_GRAPH,
   METRIC_PACE,
+  METRIC_PACE_GRAPH,
   METRIC_SPEED,
   METRIC_COUNT
 } WorkoutMetric;
@@ -31,7 +39,7 @@ typedef enum {
 #define MINIMUM_SESSION_SECONDS 120
 // 1 = ligne de debug du score d'effort dans le resume (ne jamais commiter a 1).
 #define EFFORT_DEBUG 0
-#define SUMMARY_SCROLL_STEP 30
+#define SUMMARY_SCROLL_STEP 72
 // Frequence de relecture du compteur de pas (et donc de la distance,
 // de l'allure et de la vitesse, qui en decoulent). Arbitrairement fixee
 // a 30 secondes : suffisant pour un suivi fluide sans solliciter le
@@ -157,9 +165,10 @@ typedef struct {
   int16_t interval_minutes;  // 0 = desactive, sinon 2, 5, 10, 15, 20, 30 ou 60
   int16_t vibrate_interval;  // 1 = vibrer a chaque intervalle
   int16_t sound_interval;    // 1 = bip a chaque intervalle
+  int16_t vibration_level;   // 0 = discrete, 1 = normale, 2 = renforcee
 } AlertSettings;
 
-static AlertSettings s_alerts = { 0, 0, 0, 0, 0, 0, 0 };
+static AlertSettings s_alerts = { 0, 0, 0, 0, 0, 0, 0, 1 };
 static int s_alert_km_done = 0;
 static int s_alert_interval_done = 0;
 static int s_alert_zone = -1;
@@ -186,16 +195,46 @@ static JournalSession s_detail_session;
 static int s_detail_scroll_offset = 0;
 static int s_detail_content_height = 0;
 
+// Defilement court du resume : 6 frames de 25 ms.
+#define DETAIL_SCROLL_FRAMES 6
+#define DETAIL_SCROLL_FRAME_MS 25
+static AppTimer *s_detail_scroll_timer = NULL;
+static int s_detail_scroll_frame = 0;
+static int s_detail_scroll_from = 0;
+static int s_detail_scroll_to = 0;
+
 static Window *s_timeline_window;
 static Layer *s_timeline_layer;
+// Selection = numero de page, et non numero d'evenement.
 static int s_timeline_selection = 0;
-// 1 uniquement pendant le parcours de fin de seance : la frise utilise
-// alors s_journal. Les seances historiques ne proposent pas de frise.
-static bool s_timeline_from_workout = false;
+#define TIMELINE_PAGE_TOP 36
+#define TIMELINE_PAGE_BOTTOM 8
+#define TIMELINE_EVENT_GAP 6
+#define TIMELINE_PAGE_SPACING 24
+#define TIMELINE_KICK_PX 2
+static uint8_t s_timeline_page_starts[JOURNAL_MAX_EVENTS + 4];
+static int s_timeline_page_count = 0;
+#define TIMELINE_BLOCK_HEIGHT 96
+#define TIMELINE_ZONE_HEIGHT 84
+#define TIMELINE_ZONE_EXTRA_HEIGHT \
+    (TIMELINE_ZONE_HEIGHT - TIMELINE_BLOCK_HEIGHT)
+#define TIMELINE_SCROLL_FRAMES 14
+#define TIMELINE_SCROLL_FRAME_MS 20
+static AppTimer *s_timeline_scroll_timer = NULL;
+static int s_timeline_scroll_offset = 0;
+static int s_timeline_scroll_from = 0;
+static int s_timeline_scroll_target = 0;
+static int s_timeline_scroll_frame = 0;
+static int s_timeline_stretch = 0;
 // 1 lorsque le resume final a ete ouvert depuis la frise : Retour y revient.
 static bool s_summary_from_timeline = false;
 static Window *s_stop_confirm_window;
 static Window *s_summary_window;
+static Window *s_save_window;
+static Layer *s_save_layer;
+static bool s_save_full = false;
+static bool s_save_error = false;
+static bool s_session_pending_save = false;
 
 static Layer *s_menu_layer;
 static Layer *s_workout_layer;
@@ -225,6 +264,8 @@ static char s_metric_unit_text[12];
 static char s_metric_label_text[24];
 
 static int s_current_bpm = 0;
+// Premiere FC valide obtenue pendant la seance, conservee en RAM.
+static int s_session_start_bpm = 0;
 static bool s_heart_rate_available = false;
 static int s_seconds_since_last_bpm_read = 0;
 
@@ -248,8 +289,21 @@ static int s_effort_rating = 0;
 
 // Suivi de la seance pour le journal (voir journal.h).
 static JournalSession s_journal;
+// Duree consecutive actuelle ; le Journal conserve le maximum.
+static uint16_t s_journal_redline_current = 0;
+// Durees des passages : memoire seulement, indexees par evenement.
+static uint16_t s_journal_zone_duration[JOURNAL_MAX_EVENTS];
+static uint16_t s_journal_zone_pass_seconds = 0;
+static int s_journal_zone_pass_index = -1;
 static JournalGoals s_goals;
 static time_t s_session_start_time = 0;
+static time_t s_session_end_time = 0;
+// Duree totale provisoire, capturee a chaque appui sur Stop.
+static uint32_t s_session_total_at_stop = 0;
+// Unite des bornes, fixee au debut de la seance pour la frise.
+static bool s_session_units_imperial = false;
+// Plages nominales capturees au debut de seance.
+static int s_session_zone_limits[4];
 static int s_session_start_hour = 0;
 static int s_session_start_day = 0;
 static int s_journal_zone_event = -1;
@@ -491,6 +545,11 @@ static void refresh_heart_rate_if_needed(void) {
   s_current_bpm = display_bpm;
   s_heart_rate_available = true;
 
+  if (s_session_start_bpm == 0 &&
+      display_bpm >= 30 && display_bpm <= 230) {
+    s_session_start_bpm = display_bpm;
+  }
+
   if (filtered_bpm > 0) {
     s_bpm_sum += filtered_bpm;
     s_bpm_sample_count++;
@@ -503,6 +562,11 @@ static void refresh_heart_rate_if_needed(void) {
   }
 }
 
+static void refresh_steps_now(void) {
+  HealthValue total_today = health_service_sum_today(HealthMetricStepCount);
+  s_current_steps = step_counter_update(&s_step_counter, (int) total_today);
+}
+
 static void refresh_steps_if_needed(void) {
   s_seconds_since_last_steps_read++;
 
@@ -511,15 +575,7 @@ static void refresh_steps_if_needed(void) {
   }
 
   s_seconds_since_last_steps_read = 0;
-
-  // health_service_peek_current_value() n'est pas applicable aux metriques
-  // cumulatives comme les pas (elle retourne toujours 0 pour ce type).
-  // Il faut utiliser le total du jour, puis soustraire le total au demarrage
-  // de la seance pour obtenir uniquement les pas de la seance en cours.
-  HealthValue total_today = health_service_sum_today(HealthMetricStepCount);
-
-  s_current_steps = step_counter_update(&s_step_counter, (int) total_today);
-
+  refresh_steps_now();
 }
 
 static int get_default_stride_cm(Activity activity) {
@@ -628,6 +684,105 @@ static long get_speed_hundredths(int distance_meters) {
   }
 
   return ((long) distance_meters * 360) / s_elapsed_seconds;
+}
+
+// Historique en RAM : uniquement des mesures reelles.
+// 0 indique une mesure absente, jamais une allure nulle.
+#define GRAPH_POINT_CAPACITY 256
+#define GRAPH_SAMPLE_SECONDS 30
+
+typedef struct {
+  uint32_t active_seconds;
+  uint16_t bpm;
+  uint16_t pace_seconds_km;
+} WorkoutGraphPoint;
+
+static WorkoutGraphPoint s_graph_points[GRAPH_POINT_CAPACITY];
+static int s_graph_count = 0;
+static int s_graph_best_pace = 0;
+static int s_graph_slowest_pace = 0;
+
+// Trois positions consecutives permettent une difference sur 60 s.
+static int64_t s_graph_distance_cm[3];
+static int s_graph_distance_count = 0;
+
+static void workout_graph_reset(void) {
+  s_graph_count = 1;
+  s_graph_points[0] = (WorkoutGraphPoint) {0, 0, 0};
+  s_graph_best_pace = 0;
+  s_graph_slowest_pace = 0;
+  s_graph_distance_count = 1;
+  s_graph_distance_cm[0] = 0;
+}
+
+// Sous-echantillonnage : conserve le premier point et le plus recent.
+// Les horodatages restent ceux des vraies mesures.
+static void workout_graph_compact(void) {
+  int out = 0;
+  for (int i = 0; i < s_graph_count; i += 2) {
+    s_graph_points[out++] = s_graph_points[i];
+  }
+  if ((s_graph_count - 1) % 2 != 0) {
+    s_graph_points[out++] = s_graph_points[s_graph_count - 1];
+  }
+  s_graph_count = out;
+}
+
+static void workout_graph_sample(void) {
+  if (s_elapsed_seconds <= 0 ||
+      s_elapsed_seconds % GRAPH_SAMPLE_SECONDS != 0) {
+    return;
+  }
+
+  int64_t distance_cm =
+      (int64_t) s_current_steps * get_stride_length_cm();
+
+  if (s_graph_distance_count < 3) {
+    s_graph_distance_cm[s_graph_distance_count++] = distance_cm;
+  } else {
+    s_graph_distance_cm[0] = s_graph_distance_cm[1];
+    s_graph_distance_cm[1] = s_graph_distance_cm[2];
+    s_graph_distance_cm[2] = distance_cm;
+  }
+
+  int pace = 0;
+  if (s_graph_distance_count == 3) {
+    int64_t delta_cm =
+        s_graph_distance_cm[2] - s_graph_distance_cm[0];
+
+    if (delta_cm > 0) {
+      int64_t seconds_km =
+          (int64_t) (2 * GRAPH_SAMPLE_SECONDS) * 100000 / delta_cm;
+
+      if (seconds_km > 0 && seconds_km <= PACE_MAX_SECONDS) {
+        pace = (int) seconds_km;
+      }
+    }
+  }
+
+  if (pace > 0) {
+    if (s_graph_best_pace == 0 || pace < s_graph_best_pace) {
+      s_graph_best_pace = pace;
+    }
+    if (pace > s_graph_slowest_pace) {
+      s_graph_slowest_pace = pace;
+    }
+  }
+
+  if (s_graph_count == GRAPH_POINT_CAPACITY) {
+    workout_graph_compact();
+  }
+
+  int bpm = s_heart_rate_available ? s_current_bpm : 0;
+  if (bpm < 30 || bpm > 230) {
+    bpm = 0;
+  }
+
+  s_graph_points[s_graph_count++] = (WorkoutGraphPoint) {
+    .active_seconds = (uint32_t) s_elapsed_seconds,
+    .bpm = (uint16_t) bpm,
+    .pace_seconds_km = (uint16_t) pace
+  };
 }
 
 static int get_average_bpm(void) {
@@ -771,6 +926,134 @@ static GColor get_heart_rate_color(int bpm) {
   }
 
   return zone_colors[get_heart_rate_zone(bpm)];
+}
+
+static void workout_graph_draw(
+    GContext *ctx, GRect bounds, int16_t content_width, int16_t top) {
+  bool is_hr = s_current_metric == METRIC_HEART_RATE_GRAPH;
+  int minimum = 80;
+  int maximum = 180;
+
+  if (is_hr) {
+    // Garde 80 et 180 comme reperes, mais ne coupe pas une FC hors plage.
+    for (int i = 0; i < s_graph_count; i++) {
+      int bpm = s_graph_points[i].bpm;
+      if (bpm == 0) {
+        continue;
+      }
+      if (bpm < minimum) {
+        minimum = bpm;
+      }
+      if (bpm > maximum) {
+        maximum = bpm;
+      }
+    }
+  } else if (s_graph_best_pace > 0) {
+    minimum = s_graph_best_pace * 95 / 100;
+    maximum = (s_graph_slowest_pace * 105 + 99) / 100;
+    if (maximum < minimum + 60) {
+      maximum = minimum + 60;
+    }
+  } else {
+    minimum = 0;
+    maximum = 60;
+  }
+
+  char label[64];
+  if (is_hr) {
+    snprintf(label, sizeof(label), "%s (bpm)",
+             tr(STR_LABEL_HEART_RATE));
+  } else {
+    snprintf(label, sizeof(label), "%s (min%s)",
+             tr(STR_LABEL_PACE), get_pace_unit());
+  }
+
+  GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(
+      ctx, label, font,
+      GRect(0, top + 2, content_width, 20),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+  const int16_t left = is_hr ? 24 : 6;
+  const int16_t right = content_width - 6;
+  const int16_t graph_top = top + 28;
+  const int16_t bottom = bounds.size.h - 8;
+  const int16_t height = bottom - graph_top;
+  const int range = maximum - minimum;
+
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_context_set_stroke_color(ctx, GColorLightGray);
+  graphics_draw_line(ctx, GPoint(left, graph_top), GPoint(right, graph_top));
+  graphics_draw_line(ctx, GPoint(left, bottom), GPoint(right, bottom));
+  graphics_draw_line(
+      ctx, GPoint(left, graph_top + height / 2),
+      GPoint(right, graph_top + height / 2));
+
+  if (is_hr) {
+    int16_t y180 = bottom - (180 - minimum) * height / range;
+    int16_t y80 = bottom - (80 - minimum) * height / range;
+    graphics_draw_text(
+        ctx, "180", font, GRect(0, y180 - 8, 22, 18),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(
+        ctx, "80", font, GRect(0, y80 - 12, 22, 18),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  }
+
+  bool previous_valid = false;
+  bool any_valid = false;
+  bool latest_valid = false;
+  GPoint previous = GPoint(0, 0);
+  GPoint latest = GPoint(0, 0);
+  int duration = s_elapsed_seconds > 0 ? s_elapsed_seconds : 1;
+
+  graphics_context_set_stroke_color(ctx, GColorBlack);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_context_set_fill_color(ctx, GColorBlack);
+
+  for (int i = 0; i < s_graph_count; i++) {
+    const WorkoutGraphPoint *sample = &s_graph_points[i];
+    int value = is_hr ? sample->bpm : sample->pace_seconds_km;
+
+    latest_valid = value > 0;
+    if (!latest_valid) {
+      previous_valid = false;
+      continue;
+    }
+
+    int16_t x = left + (int64_t) sample->active_seconds
+        * (right - left) / duration;
+    int16_t y = is_hr
+        ? bottom - (value - minimum) * height / range
+        : graph_top + (value - minimum) * height / range;
+
+    GPoint point = GPoint(x, y);
+    if (previous_valid) {
+      graphics_draw_line(ctx, previous, point);
+    } else {
+      graphics_fill_circle(ctx, point, 1);
+    }
+
+    previous = point;
+    latest = point;
+    previous_valid = true;
+    any_valid = true;
+  }
+
+  if (latest_valid) {
+    graphics_fill_circle(ctx, latest, 2);
+  }
+
+  if (!any_valid) {
+    graphics_context_set_text_color(ctx, GColorBlack);
+    graphics_draw_text(
+        ctx, "--", fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+        GRect(left, graph_top + height / 2 - 16, right - left, 32),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  graphics_context_set_stroke_width(ctx, 1);
 }
 
 static void get_metric_text(void) {
@@ -1023,85 +1306,91 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   }
 
-  bool heart_rate_unavailable =
-      (s_current_metric == METRIC_HEART_RATE && !s_heart_rate_available);
-  bool has_unit = (s_metric_unit_text[0] != '\0');
+  if (s_current_metric == METRIC_HEART_RATE_GRAPH ||
+      s_current_metric == METRIC_PACE_GRAPH) {
+    workout_graph_draw(ctx, bounds, content_width, half_height);
+  } else {
+    bool heart_rate_unavailable =
+        (s_current_metric == METRIC_HEART_RATE && !s_heart_rate_available);
+    bool has_unit = (s_metric_unit_text[0] != '\0');
 
-  if (heart_rate_unavailable) {
-    // Cas particulier : message texte au lieu d'une valeur numerique,
-    // pas d'unite a afficher a cote.
-    graphics_context_set_text_color(ctx, GColorBlack);
-    graphics_draw_text(
-        ctx,
-        s_metric_value_text,
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(0, half_height + 25, content_width, 55),
-        GTextOverflowModeWordWrap,
-        GTextAlignmentCenter,
-        NULL);
-  } else if (has_unit) {
-    // Valeur en grand + unite en petit, cote a cote sur la meme ligne,
-    // pour eviter tout retour a la ligne qui chevaucherait le libelle.
-    GSize value_size = graphics_text_layout_get_content_size(
-        s_metric_value_text,
-        fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
-        GRect(0, 0, content_width, 55),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft);
+    if (heart_rate_unavailable) {
+      // Cas particulier : message texte au lieu d'une valeur numerique,
+      // pas d'unite a afficher a cote.
+      graphics_context_set_text_color(ctx, GColorBlack);
+      graphics_draw_text(
+          ctx,
+          s_metric_value_text,
+          fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+          GRect(0, half_height + 25, content_width, 55),
+          GTextOverflowModeWordWrap,
+          GTextAlignmentCenter,
+          NULL);
+    } else if (has_unit) {
+      // Valeur en grand + unite en petit, cote a cote sur la meme ligne,
+      // pour eviter tout retour a la ligne qui chevaucherait le libelle.
+      GSize value_size = graphics_text_layout_get_content_size(
+          s_metric_value_text,
+          fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
+          GRect(0, 0, content_width, 55),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft);
 
-    int16_t unit_width = graphics_text_layout_get_content_size(
-        s_metric_unit_text,
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(0, 0, 80, 24),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft).w;
+      int16_t unit_width = graphics_text_layout_get_content_size(
+          s_metric_unit_text,
+          fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+          GRect(0, 0, 80, 24),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft).w;
 
-    int16_t block_width = value_size.w + 6 + unit_width;
-    int16_t block_x = (content_width - block_width) / 2;
-    if (block_x < 0) {
-      block_x = 0;
+      int16_t block_width = value_size.w + 6 + unit_width;
+      int16_t block_x = (content_width - block_width) / 2;
+      if (block_x < 0) {
+        block_x = 0;
+      }
+
+      graphics_context_set_text_color(ctx, GColorBlack);
+      graphics_draw_text(
+          ctx,
+          s_metric_value_text,
+          fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
+          GRect(block_x, half_height + 25, value_size.w + 4, 55),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft,
+          NULL);
+
+      graphics_draw_text(
+          ctx,
+          s_metric_unit_text,
+          fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+          GRect(block_x + value_size.w + 6, half_height + 46, 40, 24),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft,
+          NULL);
+    } else {
+      // Pas d'unite pour cette metrique (duree, pas encore de distance...).
+      graphics_context_set_text_color(ctx, GColorBlack);
+      graphics_draw_text(
+          ctx,
+          s_metric_value_text,
+          fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
+          GRect(0, half_height + 25, content_width, 55),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentCenter,
+          NULL);
     }
 
-    graphics_context_set_text_color(ctx, GColorBlack);
+    graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
     graphics_draw_text(
         ctx,
-        s_metric_value_text,
-        fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
-        GRect(block_x, half_height + 25, value_size.w + 4, 55),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
-
-    graphics_draw_text(
-        ctx,
-        s_metric_unit_text,
+        s_metric_label_text,
         fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(block_x + value_size.w + 6, half_height + 46, 40, 24),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
-  } else {
-    // Pas d'unite pour cette metrique (duree, pas encore de distance...).
-    graphics_context_set_text_color(ctx, GColorBlack);
-    graphics_draw_text(
-        ctx,
-        s_metric_value_text,
-        fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
-        GRect(0, half_height + 25, content_width, 55),
+        GRect(0, half_height + 80, content_width, 24),
         GTextOverflowModeTrailingEllipsis,
         GTextAlignmentCenter,
         NULL);
-  }
 
-  graphics_context_set_text_color(ctx, SECONDARY_TEXT_COLOR);
-  graphics_draw_text(
-      ctx,
-      s_metric_label_text,
-      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(0, half_height + 80, content_width, 24),
-      GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentCenter,
-      NULL);
+  }
 
   // Bouton haut : pause ou reprise
   if (s_is_paused) {
@@ -1132,11 +1421,22 @@ static void workout_layer_update_proc(Layer *layer, GContext *ctx) {
 
 // Debut effectif de la seance : l'heure est prise une seule fois ici, puis
 // reutilisee pour la frise, les succes et le tableau des 7 jours.
+static void journal_zone_pass_reset(void) {
+  s_journal_zone_event = -1;
+  s_journal_zone_event_second = 0;
+  s_journal_zone_pass_seconds = 0;
+  s_journal_zone_pass_index = -1;
+}
+
 static void journal_session_begin(void) {
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
 
   memset(&s_journal, 0, sizeof(s_journal));
+  s_session_pending_save = false;
+  memset(s_journal_zone_duration, 0, sizeof(s_journal_zone_duration));
+  journal_zone_pass_reset();
+  s_journal_redline_current = 0;
   s_journal_zone_event = -1;
   s_journal_zone_event_second = 0;
   s_journal_zone_events = 0;
@@ -1147,6 +1447,14 @@ static void journal_session_begin(void) {
   s_journal.activity = (uint8_t) s_selected_activity;
   s_journal.start_time = (uint32_t) now;
   s_session_start_time = now;
+  s_session_end_time = 0;
+  s_session_total_at_stop = 0;
+  s_session_units_imperial = s_stride.units_imperial != 0;
+  int max_bpm = get_max_heart_rate();
+  for (int zone = 0; zone < 4; zone++) {
+    s_session_zone_limits[zone] = zones_upper_limit_bpm(
+        (int) s_journal.activity, zone, max_bpm, s_profile.resting_hr);
+  }
   s_session_start_hour = t->tm_hour;
   s_session_start_day = journal_day_number(
       t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
@@ -1176,13 +1484,51 @@ static void alert_play_sound(bool is_km) {
   }
 }
 
+// Motifs : alternance vibration / pause, en millisecondes.
+// Premier indice : zone, distance, intervalle.
+// Deuxieme indice : discret, normal, renforce.
+static void alert_vibrate(int kind) {
+  static uint32_t patterns[3][3][5] = {
+    {
+      {180, 0, 0, 0, 0},
+      {320, 0, 0, 0, 0},
+      {450, 150, 450, 0, 0}
+    },
+    {
+      {150, 120, 150, 0, 0},
+      {300, 150, 300, 0, 0},
+      {450, 150, 450, 150, 450}
+    },
+    {
+      {400, 0, 0, 0, 0},
+      {650, 0, 0, 0, 0},
+      {700, 200, 350, 0, 0}
+    }
+  };
+  static const uint8_t lengths[3][3] = {
+    {1, 1, 3},
+    {3, 3, 5},
+    {1, 1, 3}
+  };
+
+  if (kind < 0 || kind > 2) {
+    return;
+  }
+  int level = s_alerts.vibration_level;
+  if (level < 0 || level > 2) {
+    level = 1;
+  }
+
+  VibePattern pattern = {
+    .durations = patterns[kind][level],
+    .num_segments = lengths[kind][level]
+  };
+  vibes_enqueue_custom_pattern(pattern);
+}
+
 static void alert_fire(bool vibrate, bool sound, bool is_km) {
   if (vibrate) {
-    if (is_km) {
-      vibes_double_pulse();
-    } else {
-      vibes_short_pulse();
-    }
+    alert_vibrate(is_km ? 1 : 0);
   }
 
   if (sound) {
@@ -1192,7 +1538,7 @@ static void alert_fire(bool vibrate, bool sound, bool is_km) {
 
 static void alert_fire_interval(bool vibrate, bool sound) {
   if (vibrate) {
-    vibes_long_pulse();
+    alert_vibrate(2);
   }
 
   if (sound) {
@@ -1245,38 +1591,61 @@ static void check_alerts(void) {
 }
 
 static void journal_track_tick(void) {
-  // Zones : secondes par zone, redline (zone 4 ou 5 consecutive) et
-  // evenement de changement de zone tenu au moins 60 s.
+  // Zones : totaux, maximum redline et passages d'au moins 120 s.
+  // Un evenement par passage ; sa duree reste en memoire.
   if (s_heart_rate_available && s_heart_rate_zone >= 0 &&
       s_heart_rate_zone < JOURNAL_ZONE_COUNT) {
     s_journal.zone_seconds[s_heart_rate_zone]++;
 
     if (s_heart_rate_zone >= 3) {
-      s_journal.redline_seconds++;
+      if (s_journal_redline_current < UINT16_MAX) {
+        s_journal_redline_current++;
+      }
+      if (s_journal_redline_current > s_journal.redline_seconds) {
+        s_journal.redline_seconds = s_journal_redline_current;
+      }
     } else {
-      s_journal.redline_seconds = 0;
+      s_journal_redline_current = 0;
     }
 
     if (s_heart_rate_zone != s_journal_zone_event) {
+      journal_zone_pass_reset();
       s_journal_zone_event = s_heart_rate_zone;
-      s_journal_zone_event_second = s_elapsed_seconds;
-    } else if (s_elapsed_seconds - s_journal_zone_event_second >= 60 &&
-               s_journal.event_count < JOURNAL_MAX_EVENTS &&
-               s_journal_zone_events < JOURNAL_MAX_ZONE_EVENTS) {
-      journal_add_event(&s_journal, JE_ZONE,
-                        (uint16_t) s_elapsed_seconds,
-                        (uint8_t) s_heart_rate_zone);
-      s_journal_zone_events++;
-      s_journal_zone_event_second = s_elapsed_seconds;
+      // Le tick courant represente la seconde qui vient de s'ecouler.
+      s_journal_zone_event_second =
+          s_elapsed_seconds > 0 ? s_elapsed_seconds - 1 : 0;
+    }
+
+    if (s_journal_zone_pass_seconds < UINT16_MAX) {
+      s_journal_zone_pass_seconds++;
+    }
+
+    if (s_journal_zone_pass_index < 0 &&
+        s_journal_zone_pass_seconds >= 120 &&
+        s_journal.event_count < JOURNAL_MAX_EVENTS &&
+        s_journal_zone_events < JOURNAL_MAX_ZONE_EVENTS) {
+      int index = s_journal.event_count;
+      if (journal_add_event(
+              &s_journal, JE_ZONE,
+              (uint16_t) s_journal_zone_event_second,
+              (uint8_t) s_heart_rate_zone)) {
+        s_journal_zone_pass_index = index;
+        s_journal_zone_events++;
+      }
+    }
+
+    if (s_journal_zone_pass_index >= 0) {
+      s_journal_zone_duration[s_journal_zone_pass_index] =
+          s_journal_zone_pass_seconds;
     }
   } else {
-    s_journal_zone_event = -1;
-    s_journal.redline_seconds = 0;
+    journal_zone_pass_reset();
+    s_journal_redline_current = 0;
   }
 
   // Bornes : marche 1 km ou 1 mile, course 2 km ou 2 miles.
   if (s_selected_activity != ACTIVITY_TRAINING) {
-    int borne_m = (s_stride.units_imperial ? 1609 : 1000) *
+    int borne_m = (s_session_units_imperial ? 1609 : 1000) *
         ((s_selected_activity == ACTIVITY_RUN) ? 2 : 1);
     int borne_count = get_distance_meters() / borne_m;
 
@@ -1313,6 +1682,7 @@ static void workout_tick_handler(struct tm *tick_time,
     s_elapsed_seconds++;
     refresh_heart_rate_if_needed();
     refresh_steps_if_needed();
+    workout_graph_sample();
     check_alerts();
     journal_track_tick();
   } else {
@@ -1409,37 +1779,203 @@ static void menu_window_unload(Window *window) {
   s_menu_layer = NULL;
 }
 
-static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  const int16_t row_height = 58;
-  const int16_t first_row_y = 36;
+// Garde la police principale ; dessine uniquement AM/PM en petit.
+static void draw_clock_small_suffix(
+    GContext *ctx, const char *text, GFont main_font,
+    GRect frame, GTextAlignment alignment) {
+  char main_text[64];
+  snprintf(main_text, sizeof(main_text), "%s", text);
 
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+  size_t length = strlen(main_text);
+  const char *suffix = NULL;
+  if (length >= 3) {
+    const char *tail = main_text + length - 3;
+    if (strcmp(tail, " AM") == 0) {
+      suffix = "AM";
+    } else if (strcmp(tail, " PM") == 0) {
+      suffix = "PM";
+    }
+  }
 
-  graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(
-      ctx,
-      "Journal",
-      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-      GRect(0, 4, bounds.size.w, 30),
-      GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentCenter,
-      NULL);
-
-  if (s_journal_count == 0) {
+  if (suffix == NULL) {
     graphics_draw_text(
-        ctx,
-        tr(STR_TOO_SHORT),
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(6, 100, bounds.size.w - 12, 40),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentCenter,
-        NULL);
+        ctx, text, main_font, frame,
+        GTextOverflowModeTrailingEllipsis, alignment, NULL);
     return;
   }
 
-  int visible_rows = (bounds.size.h - first_row_y) / row_height;
+  main_text[length - 3] = '\0';
+  GFont suffix_font = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  GSize main_size = graphics_text_layout_get_content_size(
+      main_text, main_font, GRect(0, 0, 1000, frame.size.h),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+  GSize suffix_size = graphics_text_layout_get_content_size(
+      suffix, suffix_font, GRect(0, 0, 100, frame.size.h),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+
+  const int gap = 3;
+  int width = main_size.w + gap + suffix_size.w;
+  int x = frame.origin.x;
+  if (alignment == GTextAlignmentRight) {
+    x += frame.size.w - width;
+  } else if (alignment == GTextAlignmentCenter) {
+    x += (frame.size.w - width) / 2;
+  }
+  if (x < frame.origin.x) {
+    x = frame.origin.x;
+  }
+
+  int suffix_y = frame.origin.y + main_size.h - suffix_size.h;
+  if (suffix_y < frame.origin.y) {
+    suffix_y = frame.origin.y;
+  }
+
+  graphics_draw_text(
+      ctx, main_text, main_font,
+      GRect(x, frame.origin.y, main_size.w + 2, frame.size.h),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  graphics_draw_text(
+      ctx, suffix, suffix_font,
+      GRect(x + main_size.w + gap, suffix_y, suffix_size.w + 2, 20),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+
+// Separe uniquement l'unite de duree " min", pas "min/km".
+static bool split_duration_min(
+    const char *text, char *before, char *after) {
+  const char *unit = strstr(text, " min");
+  if (unit == NULL || (unit[4] != '\0' && unit[4] != ' ') ||
+      strlen(text) >= 128) {
+    return false;
+  }
+
+  size_t length = (size_t) (unit - text);
+  memcpy(before, text, length);
+  before[length] = '\0';
+  snprintf(after, 128, "%s", unit + 4);
+  return true;
+}
+
+static GSize text_small_min_size(
+    const char *text, GFont font, GRect frame,
+    GTextOverflowMode overflow, GTextAlignment alignment) {
+  char before[128];
+  char after[128];
+  if (overflow != GTextOverflowModeTrailingEllipsis ||
+      !split_duration_min(text, before, after)) {
+    return graphics_text_layout_get_content_size(
+        text, font, frame, overflow, alignment);
+  }
+
+  GRect measure = GRect(0, 0, 1000, frame.size.h);
+  GFont small = fonts_get_system_font(FONT_KEY_GOTHIC_18);
+  GSize a = graphics_text_layout_get_content_size(
+      before, font, measure, overflow, GTextAlignmentLeft);
+  GSize b = graphics_text_layout_get_content_size(
+      "min", small, measure, overflow, GTextAlignmentLeft);
+  GSize c = graphics_text_layout_get_content_size(
+      after, font, measure, overflow, GTextAlignmentLeft);
+
+  int height = a.h > c.h ? a.h : c.h;
+  if (b.h > height) {
+    height = b.h;
+  }
+  return GSize(a.w + 3 + b.w + c.w, height);
+}
+
+static void draw_text_small_min(
+    GContext *ctx, const char *text, GFont font, GRect frame,
+    GTextOverflowMode overflow, GTextAlignment alignment) {
+  char before[128];
+  char after[128];
+  if (overflow != GTextOverflowModeTrailingEllipsis ||
+      !split_duration_min(text, before, after)) {
+    graphics_draw_text(ctx, text, font, frame, overflow, alignment, NULL);
+    return;
+  }
+
+  GRect measure = GRect(0, 0, 1000, frame.size.h);
+  GFont small = fonts_get_system_font(FONT_KEY_GOTHIC_18);
+  GSize a = graphics_text_layout_get_content_size(
+      before, font, measure, overflow, GTextAlignmentLeft);
+  GSize b = graphics_text_layout_get_content_size(
+      "min", small, measure, overflow, GTextAlignmentLeft);
+  GSize c = graphics_text_layout_get_content_size(
+      after, font, measure, overflow, GTextAlignmentLeft);
+
+  int width = a.w + 3 + b.w + c.w;
+  int x = frame.origin.x;
+  if (alignment == GTextAlignmentRight) {
+    x += frame.size.w - width;
+  } else if (alignment == GTextAlignmentCenter) {
+    x += (frame.size.w - width) / 2;
+  }
+  if (x < frame.origin.x) {
+    x = frame.origin.x;
+  }
+
+  int main_height = a.h > c.h ? a.h : c.h;
+  int small_y = frame.origin.y + main_height - b.h;
+  if (small_y < frame.origin.y) {
+    small_y = frame.origin.y;
+  }
+  int right = frame.origin.x + frame.size.w;
+
+  if (before[0] != '\0' && x < right) {
+    graphics_draw_text(
+        ctx, before, font,
+        GRect(x, frame.origin.y, right - x, frame.size.h),
+        overflow, GTextAlignmentLeft, NULL);
+  }
+  x += a.w + 3;
+  if (x < right) {
+    graphics_draw_text(
+        ctx, "min", small,
+        GRect(x, small_y, right - x, 24),
+        overflow, GTextAlignmentLeft, NULL);
+  }
+  x += b.w;
+  if (after[0] != '\0' && x < right) {
+    graphics_draw_text(
+        ctx, after, font,
+        GRect(x, frame.origin.y, right - x, frame.size.h),
+        overflow, GTextAlignmentLeft, NULL);
+  }
+}
+
+static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  const int16_t first_row_y = 36;
+  const int16_t compact_height = 32;
+  const int16_t expanded_height = 64;
+  GFont date_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GFont small_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont detail_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+  graphics_context_set_text_color(ctx, GColorBlack);
+
+  for (int offset = 0; offset <= 1; offset++) {
+    draw_text_small_min(
+        ctx, "Journal",
+        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+        GRect(offset, 4, bounds.size.w, 32),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter);
+  }
+
+  if (s_journal_count == 0) {
+    draw_text_small_min(
+        ctx, tr(STR_TOO_SHORT), date_font,
+        GRect(6, 100, bounds.size.w - 12, 40),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter);
+    return;
+  }
+
+  // Reserve la place d'une ligne selectionnee depliee.
+  int available_height = bounds.size.h - first_row_y;
+  int visible_rows =
+      (available_height - expanded_height) / compact_height + 1;
   if (visible_rows < 1) {
     visible_rows = 1;
   }
@@ -1467,66 +2003,79 @@ static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
     last_visible = s_journal_count;
   }
 
+  int16_t row_y = first_row_y;
   for (int i = s_journal_first_visible; i < last_visible; i++) {
-    int16_t row_y =
-        first_row_y + (i - s_journal_first_visible) * row_height;
-    bool selected = (i == s_journal_selection);
+    bool selected = i == s_journal_selection;
+    int16_t row_height = selected ? expanded_height : compact_height;
+    char date_text[12];
+    char time_text[12];
     char duration_text[16];
-    char date_text[20];
+
     time_t start_time = (time_t) s_journal_list[i].start_time;
     struct tm *start_tm = localtime(&start_time);
+
+    if (start_tm == NULL ||
+        strftime(date_text, sizeof(date_text), "%d/%m", start_tm) == 0) {
+      snprintf(date_text, sizeof(date_text), "--/--");
+    }
+    timeline_format_clock(start_time, time_text, sizeof(time_text));
 
     if (selected) {
       graphics_context_set_fill_color(ctx, ACCENT_YELLOW);
       graphics_fill_rect(
-          ctx,
-          GRect(4, row_y + 2, bounds.size.w - 8, row_height - 4),
-          4,
-          GCornersAll);
+          ctx, GRect(4, row_y, bounds.size.w - 8, row_height - 1),
+          4, GCornersAll);
     }
 
-    snprintf(duration_text, sizeof(duration_text), "%d min",
-             (int) (s_journal_list[i].active_seconds / 60));
+    graphics_context_set_text_color(ctx, GColorBlack);
+    draw_text_small_min(
+        ctx, date_text, date_font,
+        GRect(12, row_y, 84, 32),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    draw_clock_small_suffix(
+        ctx, time_text, date_font,
+        GRect(bounds.size.w - 96, row_y, 84, 32),
+        GTextAlignmentRight);
 
-    if (start_tm != NULL) {
+    if (selected) {
       snprintf(
-          date_text, sizeof(date_text), "%02d/%02d · %02d:%02d",
-          start_tm->tm_mday,
-          start_tm->tm_mon + 1,
-          start_tm->tm_hour,
-          start_tm->tm_min);
-    } else {
-      snprintf(date_text, sizeof(date_text), "--/-- · --:--");
+          duration_text, sizeof(duration_text), "%u min",
+          (unsigned) (s_journal_list[i].active_seconds / 60));
+
+      GSize duration_size = text_small_min_size(
+          duration_text, detail_font, GRect(0, 0, 200, 32),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentRight);
+
+      int16_t duration_width = duration_size.w + 4;
+      int16_t duration_x = bounds.size.w - 12 - duration_width;
+      int16_t activity_width = duration_x - 12 - 8;
+
+      const char *activity =
+          tr(STR_ACTIVITY_WALK + s_journal_list[i].activity);
+      GFont activity_font = detail_font;
+
+      GSize activity_size = text_small_min_size(
+          activity, activity_font, GRect(0, 0, 400, 32),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+
+      if (activity_size.w + 1 > activity_width) {
+        activity_font = small_font;
+      }
+
+      for (int offset = 0; offset <= 1; offset++) {
+        draw_text_small_min(
+            ctx, activity, activity_font,
+            GRect(12 + offset, row_y + 32, activity_width, 32),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      }
+
+      draw_text_small_min(
+          ctx, duration_text, detail_font,
+          GRect(duration_x, row_y + 32, duration_width, 32),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentRight);
     }
 
-    graphics_context_set_text_color(ctx, GColorBlack);
-    graphics_draw_text(
-        ctx,
-        tr(STR_ACTIVITY_WALK + s_journal_list[i].activity),
-        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-        GRect(12, row_y + 2, 118, 28),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
-
-    graphics_draw_text(
-        ctx,
-        duration_text,
-        fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-        GRect(bounds.size.w - 88, row_y + 2, 76, 28),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentRight,
-        NULL);
-
-    graphics_context_set_text_color(ctx, GColorBlack);
-    graphics_draw_text(
-        ctx,
-        date_text,
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(12, row_y + 31, bounds.size.w - 24, 22),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
+    row_y += row_height;
   }
 }
 
@@ -1588,13 +2137,18 @@ static void journal_window_load(Window *window) {
     s_journal_selection = 0;
   }
 
+  int readable_count = 0;
+
   for (int i = 0; i < s_journal_count; i++) {
     int slot = journal_index_slot_by_age(&index, i);
 
-    if (slot >= 0) {
-      journal_load_session(slot, &s_journal_list[i]);
+    if (slot >= 0 &&
+        journal_load_session(slot, &s_journal_list[readable_count])) {
+      readable_count++;
     }
   }
+
+  s_journal_count = readable_count;
 
   s_journal_layer = layer_create(bounds);
   layer_set_update_proc(s_journal_layer, journal_layer_update_proc);
@@ -1610,15 +2164,66 @@ static void draw_summary_line(GContext *ctx, int16_t y,
                               const char *value, const char *unit,
                               const char *label, GFont value_font);
 
-static void detail_up_click_handler(
-    ClickRecognizerRef recognizer, void *context) {
-  s_detail_scroll_offset -= SUMMARY_SCROLL_STEP;
+static void detail_scroll_timer_handler(void *context) {
+  s_detail_scroll_timer = NULL;
+  s_detail_scroll_frame++;
 
-  if (s_detail_scroll_offset < 0) {
-    s_detail_scroll_offset = 0;
+  if (s_detail_scroll_frame >= DETAIL_SCROLL_FRAMES) {
+    s_detail_scroll_offset = s_detail_scroll_to;
+    s_detail_scroll_frame = 0;
+    layer_mark_dirty(s_detail_layer);
+    return;
   }
 
+  int range = s_detail_scroll_to - s_detail_scroll_from;
+  s_detail_scroll_offset =
+      s_detail_scroll_from + range * s_detail_scroll_frame
+      / DETAIL_SCROLL_FRAMES;
+
   layer_mark_dirty(s_detail_layer);
+  s_detail_scroll_timer = app_timer_register(
+      DETAIL_SCROLL_FRAME_MS,
+      detail_scroll_timer_handler,
+      NULL);
+}
+
+static void detail_start_scroll_animation(int target_offset) {
+  detail_cancel_scroll_animation();
+
+  s_detail_scroll_from = s_detail_scroll_offset;
+  s_detail_scroll_to = target_offset;
+
+  if (s_detail_scroll_from == s_detail_scroll_to) {
+    return;
+  }
+
+  s_detail_scroll_frame = 0;
+  s_detail_scroll_timer = app_timer_register(
+      DETAIL_SCROLL_FRAME_MS,
+      detail_scroll_timer_handler,
+      NULL);
+}
+
+static void detail_cancel_scroll_animation(void) {
+  if (s_detail_scroll_timer != NULL) {
+    app_timer_cancel(s_detail_scroll_timer);
+    s_detail_scroll_timer = NULL;
+  }
+
+  s_detail_scroll_frame = 0;
+  s_detail_scroll_from = s_detail_scroll_offset;
+  s_detail_scroll_to = s_detail_scroll_offset;
+}
+
+static void detail_up_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  int target = s_detail_scroll_offset - SUMMARY_SCROLL_STEP;
+
+  if (target < 0) {
+    target = 0;
+  }
+
+  detail_start_scroll_animation(target);
 }
 
 static void detail_down_click_handler(
@@ -1630,19 +2235,19 @@ static void detail_down_click_handler(
     max_offset = 0;
   }
 
-  s_detail_scroll_offset += SUMMARY_SCROLL_STEP;
+  int target = s_detail_scroll_offset + SUMMARY_SCROLL_STEP;
 
-  if (s_detail_scroll_offset > max_offset) {
-    s_detail_scroll_offset = max_offset;
+  if (target > max_offset) {
+    target = max_offset;
   }
 
-  layer_mark_dirty(s_detail_layer);
+  detail_start_scroll_animation(target);
 }
 
 static void draw_detail_line(GContext *ctx, int16_t y,
                              const char *value, const char *unit,
                              const char *label, GFont value_font) {
-  GSize value_size = graphics_text_layout_get_content_size(
+  GSize value_size = text_small_min_size(
       value,
       value_font,
       GRect(0, 0, 400, 50),
@@ -1650,35 +2255,38 @@ static void draw_detail_line(GContext *ctx, int16_t y,
       GTextAlignmentLeft);
 
   graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(
-      ctx,
-      value,
-      value_font,
-      GRect(6, y, 188, 44),
-      GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentLeft,
-      NULL);
-
-  if (unit[0] != '\0') {
-    graphics_draw_text(
-        ctx,
-        unit,
-        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-        GRect(6 + value_size.w + 6, y + SUMMARY_UNIT_Y_OFFSET, 110, 34),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
-  }
-
-  graphics_context_set_text_color(ctx, GColorBlack);
-  graphics_draw_text(
+  draw_text_small_min(
       ctx,
       label,
       fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(6, y + 42, 188, 22),
+      GRect(6, y, 188, 22),
       GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentLeft,
-      NULL);
+      GTextAlignmentLeft);
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  if (strcmp(label, tr(STR_LABEL_DATE)) == 0) {
+    draw_clock_small_suffix(
+        ctx, value, value_font, GRect(6, y + 22, 188, 44),
+        GTextAlignmentLeft);
+  } else {
+    draw_text_small_min(
+        ctx,
+        value,
+        value_font,
+        GRect(6, y + 22, 188, 44),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft);
+  }
+
+  if (unit[0] != '\0') {
+    draw_text_small_min(
+        ctx,
+        unit,
+        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+        GRect(6 + value_size.w + 6, y + 22 + SUMMARY_UNIT_Y_OFFSET, 110, 34),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft);
+  }
 
   graphics_context_set_stroke_color(ctx, GColorLightGray);
   graphics_draw_line(ctx, GPoint(6, y + 70), GPoint(194, y + 70));
@@ -1695,7 +2303,7 @@ static void draw_detail_intensity(GContext *ctx, int16_t y, int level) {
   const int16_t segment_width = 30;
   const int16_t segment_height = 20;
   const int16_t segment_gap = 4;
-  const int16_t segment_y = y + 8;
+  const int16_t segment_y = y + 26;
 
   for (int i = 0; i < 5; i++) {
     int16_t x = 6 + i * (segment_width + segment_gap);
@@ -1714,7 +2322,7 @@ static void draw_detail_intensity(GContext *ctx, int16_t y, int level) {
       ctx,
       tr(STR_SUMMARY_INTENSITY),
       fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(6, y + 42, 188, 22),
+      GRect(6, y, 188, 22),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft,
       NULL);
@@ -1723,12 +2331,481 @@ static void draw_detail_intensity(GContext *ctx, int16_t y, int level) {
   graphics_draw_line(ctx, GPoint(6, y + 70), GPoint(194, y + 70));
 }
 
+typedef enum {
+  TIMELINE_MARKER_FEELING = 0,
+  TIMELINE_MARKER_ACHIEVEMENT,
+  TIMELINE_MARKER_START,
+  TIMELINE_MARKER_ZONE,
+  TIMELINE_MARKER_DISTANCE,
+  TIMELINE_MARKER_CALORIES,
+  TIMELINE_MARKER_END
+} TimelineMarker;
+
+static void timeline_draw_small_star(
+    GContext *ctx, GPoint center, GColor color) {
+  GPoint points[] = {
+    {6, 0}, {8, 4}, {12, 4}, {9, 7}, {10, 12},
+    {6, 9}, {2, 12}, {3, 7}, {0, 4}, {4, 4}
+  };
+  GPathInfo info = {
+    .num_points = sizeof(points) / sizeof(points[0]),
+    .points = points
+  };
+  GPath *path = gpath_create(&info);
+  if (path != NULL) {
+    graphics_context_set_fill_color(ctx, color);
+    gpath_move_to(path, GPoint(center.x - 6, center.y - 6));
+    gpath_draw_filled(ctx, path);
+    gpath_destroy(path);
+  }
+}
+
+static void timeline_draw_marker(GContext *ctx, GPoint center,
+                                 TimelineMarker marker, GColor color) {
+  int16_t x = center.x - 9;
+  int16_t y = center.y - 9;
+  graphics_context_set_fill_color(ctx, color);
+  graphics_context_set_stroke_color(ctx, color);
+  graphics_context_set_stroke_width(ctx, 2);
+
+  if (marker == TIMELINE_MARKER_ACHIEVEMENT) {
+    // Deux rubans au-dessus du medaillon.
+    graphics_context_set_stroke_width(ctx, 3);
+    graphics_draw_line(
+        ctx, GPoint(center.x - 5, center.y - 9),
+        GPoint(center.x - 1, center.y - 3));
+    graphics_draw_line(
+        ctx, GPoint(center.x + 5, center.y - 9),
+        GPoint(center.x + 1, center.y - 3));
+
+    graphics_context_set_stroke_width(ctx, 2);
+    graphics_draw_circle(ctx, GPoint(center.x, center.y + 3), 6);
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_circle(ctx, GPoint(center.x, center.y + 3), 3);
+    return;
+  }
+
+  if (marker == TIMELINE_MARKER_START ||
+      marker == TIMELINE_MARKER_END) {
+    // Mat commun aux drapeaux de depart et d'arrivee.
+    graphics_draw_line(ctx, GPoint(x + 3, y + 1),
+                       GPoint(x + 3, y + 17));
+    graphics_context_set_stroke_width(ctx, 1);
+
+    if (marker == TIMELINE_MARKER_START) {
+      graphics_fill_rect(ctx, GRect(x + 4, y + 1, 12, 8),
+                         0, GCornerNone);
+    } else {
+      // Damier : quatre colonnes et deux rangees.
+      for (int row = 0; row < 2; row++) {
+        for (int col = 0; col < 4; col++) {
+          if ((row + col) % 2 == 0) {
+            graphics_fill_rect(
+                ctx, GRect(x + 4 + col * 3, y + 1 + row * 4, 3, 4),
+                0, GCornerNone);
+          }
+        }
+      }
+      graphics_draw_rect(ctx, GRect(x + 4, y + 1, 12, 8));
+    }
+
+    return;
+  }
+
+  if (marker == TIMELINE_MARKER_FEELING) {
+    graphics_draw_circle(ctx, center, 8);
+    graphics_fill_circle(ctx, GPoint(x + 6, y + 6), 1);
+    graphics_fill_circle(ctx, GPoint(x + 12, y + 6), 1);
+    graphics_draw_line(ctx, GPoint(x + 5, y + 11),
+                       GPoint(x + 8, y + 14));
+    graphics_draw_line(ctx, GPoint(x + 8, y + 14),
+                       GPoint(x + 10, y + 14));
+    graphics_draw_line(ctx, GPoint(x + 10, y + 14),
+                       GPoint(x + 13, y + 11));
+    graphics_context_set_stroke_width(ctx, 1);
+    return;
+  }
+
+  if (marker == TIMELINE_MARKER_DISTANCE) {
+    graphics_draw_round_rect(ctx, GRect(x + 3, y + 1, 12, 16), 3);
+    graphics_draw_line(ctx, GPoint(x + 6, y + 6),
+                       GPoint(x + 12, y + 6));
+    graphics_draw_line(ctx, GPoint(x + 6, y + 11),
+                       GPoint(x + 12, y + 11));
+    graphics_context_set_stroke_width(ctx, 1);
+    return;
+  }
+
+  GPoint points[12];
+  uint32_t count = 0;
+
+  if (marker == TIMELINE_MARKER_ZONE) {
+    GPoint shape[] = {
+      {9, 5}, {6, 1}, {2, 1}, {0, 5}, {1, 9},
+      {9, 17}, {17, 9}, {18, 5}, {16, 1}, {12, 1}
+    };
+    count = sizeof(shape) / sizeof(shape[0]);
+    for (uint32_t i = 0; i < count; i++) {
+      points[i] = shape[i];
+    }
+  } else if (marker == TIMELINE_MARKER_CALORIES) {
+    GPoint shape[] = {
+      {10, 0}, {10, 6}, {14, 4}, {17, 10}, {16, 14},
+      {12, 18}, {6, 18}, {2, 14}, {1, 10}, {5, 5}, {5, 10}
+    };
+    count = sizeof(shape) / sizeof(shape[0]);
+    for (uint32_t i = 0; i < count; i++) {
+      points[i] = shape[i];
+    }
+  }
+
+  if (count > 0) {
+    GPathInfo info = {
+      .num_points = count,
+      .points = points
+    };
+    GPath *path = gpath_create(&info);
+    if (path != NULL) {
+      gpath_move_to(path, GPoint(x, y));
+      gpath_draw_filled(ctx, path);
+      gpath_destroy(path);
+    }
+  }
+
+  graphics_context_set_stroke_width(ctx, 1);
+}
+
+// Liste des evenements affichables, tries par temps actif.
+// Chaque passage de zone conserve son evenement distinct.
+static int timeline_event_indices(const JournalSession *session,
+                                  uint8_t *indices) {
+  int count = 0;
+  int event_count = session->event_count;
+
+  if (event_count > JOURNAL_MAX_EVENTS) {
+    event_count = JOURNAL_MAX_EVENTS;
+  }
+
+  for (int i = 0; i < event_count; i++) {
+    const JournalEvent *event = &session->events[i];
+
+    if (event->type == JE_ZONE) {
+      if (event->value >= JOURNAL_ZONE_COUNT) {
+        continue;
+      }
+    } else if (event->type == JE_BORNE || event->type == JE_FLAME) {
+      if (event->value == 0) {
+        continue;
+      }
+    } else {
+      continue;
+    }
+
+    // Tri stable : le passage de zone est confirme apres 60 s,
+    // mais son horodatage designe son debut.
+    int position = count;
+    while (position > 0 &&
+           session->events[indices[position - 1]].seconds > event->seconds) {
+      indices[position] = indices[position - 1];
+      position--;
+    }
+    indices[position] = (uint8_t) i;
+    count++;
+  }
+
+  return count;
+}
+
+
+static int timeline_heading_height(bool achievement) {
+  const char *title = "";
+  if (achievement) {
+    int ach = journal_top_achievement(s_journal.achievements);
+    if (ach >= 0) {
+      title = tr(STR_ACHIEVEMENT_WELCOME_BACK + ach);
+    }
+  } else if (s_journal.feeling >= 1 && s_journal.feeling <= 4) {
+    title = tr(STR_EFFORT_RELAXED + s_journal.feeling - 1);
+  }
+
+  int width = s_timeline_layer != NULL
+      ? layer_get_bounds(s_timeline_layer).size.w : 200;
+  GFont font = fonts_get_system_font(
+      achievement ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_28_BOLD);
+  GSize size = graphics_text_layout_get_content_size(
+      title, font,
+      GRect(0, 0, width - (achievement ? 86 : 42), 1000),
+      GTextOverflowModeWordWrap,
+      achievement ? GTextAlignmentCenter : GTextAlignmentLeft);
+
+  if (achievement) {
+    return size.h + 8 > 36 ? size.h + 8 : 36;
+  }
+  return size.h > 34 ? size.h : 34;
+}
+
+static int timeline_achievement_height(void) {
+  int achievement = journal_top_achievement(s_journal.achievements);
+  if (achievement < 0) {
+    return 62;
+  }
+
+  int width = 200;
+  if (s_timeline_layer != NULL) {
+    width = layer_get_bounds(s_timeline_layer).size.w;
+  }
+
+  const char *description = tr(STR_ACH_DESC_WELCOME_BACK + achievement);
+  GSize size = graphics_text_layout_get_content_size(
+      description,
+      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      GRect(0, 0, width - 42, 200),
+      GTextOverflowModeWordWrap,
+      GTextAlignmentLeft);
+
+  int height = timeline_heading_height(true) + 20 + size.h + 8;
+  return height > 62 ? height : 62;
+}
+
+static int timeline_block_height(int index,
+                                 bool has_achievement,
+                                 int first_event_block,
+                                 int event_count,
+                                 const uint8_t *indices) {
+  if (index == 0) {
+    return timeline_heading_height(false) + 20 + 8;
+  }
+  if (has_achievement && index == 1) {
+    return timeline_achievement_height();
+  }
+  if (index == first_event_block - 1) {
+    return 84;
+  }
+  if (index == first_event_block + event_count) {
+    return 84;
+  }
+  if (index >= first_event_block &&
+      index < first_event_block + event_count) {
+    const JournalEvent *event =
+        &s_journal.events[indices[index - first_event_block]];
+    return event->type == JE_ZONE ? TIMELINE_ZONE_HEIGHT : 62;
+  }
+  return 62;
+}
+
+static int timeline_block_offset(int index) {
+  uint8_t indices[JOURNAL_MAX_EVENTS];
+  int event_count = timeline_event_indices(&s_journal, indices);
+  bool has_achievement =
+      journal_top_achievement(s_journal.achievements) >= 0;
+  int first_event_block = 2 + (has_achievement ? 1 : 0);
+  int screen_height = s_timeline_layer != NULL
+      ? layer_get_bounds(s_timeline_layer).size.h : 228;
+  int page_span = screen_height - TIMELINE_PAGE_TOP
+      + TIMELINE_PAGE_SPACING;
+  int offset = 0;
+  int page_origin = 0;
+  int next_page = 1;
+
+  for (int i = 0; i <= index; i++) {
+    if (next_page < s_timeline_page_count &&
+        i == s_timeline_page_starts[next_page]) {
+      int minimum_offset = page_origin + page_span;
+      if (offset < minimum_offset) {
+        offset = minimum_offset;
+      }
+      page_origin = offset;
+      next_page++;
+    }
+
+    if (i == index) {
+      return offset;
+    }
+
+    offset += timeline_block_height(
+        i, has_achievement, first_event_block, event_count, indices)
+        + TIMELINE_EVENT_GAP;
+  }
+
+  return offset;
+}
+
+static void timeline_build_pages(void) {
+  uint8_t indices[JOURNAL_MAX_EVENTS];
+  int event_count = timeline_event_indices(&s_journal, indices);
+  bool has_achievement =
+      journal_top_achievement(s_journal.achievements) >= 0;
+  int first_event_block = 2 + (has_achievement ? 1 : 0);
+  int block_count = first_event_block + event_count + 1;
+  int screen_height = layer_get_bounds(s_timeline_layer).size.h;
+  int capacity = screen_height - TIMELINE_PAGE_TOP
+      - TIMELINE_PAGE_BOTTOM - TIMELINE_KICK_PX;
+  int used = 0;
+
+  s_timeline_page_count = 1;
+  s_timeline_page_starts[0] = 0;
+
+  for (int i = 0; i < block_count; i++) {
+    int height = timeline_block_height(
+        i, has_achievement, first_event_block, event_count, indices);
+    int gap = used > 0 ? TIMELINE_EVENT_GAP : 0;
+
+    if (used > 0 && used + gap + height > capacity) {
+      s_timeline_page_starts[s_timeline_page_count++] = (uint8_t) i;
+      used = 0;
+      gap = 0;
+    }
+
+    used += gap + height;
+  }
+}
+
+static void timeline_scroll_finish(void) {
+  if (s_timeline_scroll_timer != NULL) {
+    app_timer_cancel(s_timeline_scroll_timer);
+    s_timeline_scroll_timer = NULL;
+  }
+
+  s_timeline_stretch = 0;
+
+  if (s_timeline_page_count > 0) {
+    s_timeline_scroll_offset = timeline_block_offset(
+        s_timeline_page_starts[s_timeline_selection]);
+  } else {
+    s_timeline_scroll_offset = 0;
+  }
+
+  if (s_timeline_layer != NULL) {
+    layer_mark_dirty(s_timeline_layer);
+  }
+}
+
+static void timeline_scroll_tick(void *context) {
+  // Depassement, contre-secousse, puis stabilisation.
+  static const uint16_t progress[TIMELINE_SCROLL_FRAMES] = {
+    20, 70, 160, 300, 480, 680, 850,
+    970, 1040, 1060, 1030, 990, 1005, 1000
+  };
+  static const uint8_t stretch[TIMELINE_SCROLL_FRAMES] = {
+    0, 2, 4, 5, 6, 6, 4,
+    2, 1, 0, 0, 0, 0, 0
+  };
+
+  s_timeline_scroll_timer = NULL;
+
+  if (s_timeline_layer == NULL) {
+    s_timeline_stretch = 0;
+    return;
+  }
+
+  int frame = s_timeline_scroll_frame;
+  if (frame >= TIMELINE_SCROLL_FRAMES) {
+    timeline_scroll_finish();
+    return;
+  }
+
+  int32_t distance =
+      (int32_t) s_timeline_scroll_target - s_timeline_scroll_from;
+  s_timeline_scroll_offset = s_timeline_scroll_from
+      + (distance * progress[frame]) / 1000;
+  s_timeline_stretch = stretch[frame];
+  s_timeline_scroll_frame++;
+
+  if (s_timeline_scroll_frame < TIMELINE_SCROLL_FRAMES) {
+    s_timeline_scroll_timer = app_timer_register(
+        TIMELINE_SCROLL_FRAME_MS, timeline_scroll_tick, NULL);
+    if (s_timeline_scroll_timer == NULL) {
+      timeline_scroll_finish();
+      return;
+    }
+  } else {
+    s_timeline_scroll_offset = s_timeline_scroll_target;
+    s_timeline_stretch = 0;
+  }
+
+  layer_mark_dirty(s_timeline_layer);
+}
+
+static void timeline_scroll_to_selection(void) {
+  if (s_timeline_scroll_timer != NULL) {
+    app_timer_cancel(s_timeline_scroll_timer);
+    s_timeline_scroll_timer = NULL;
+  }
+
+  // En cas d'appui rapide, repart de la position actuellement affichee.
+  s_timeline_scroll_from = s_timeline_scroll_offset;
+  s_timeline_scroll_target = timeline_block_offset(
+      s_timeline_page_starts[s_timeline_selection]);
+  s_timeline_scroll_frame = 0;
+  s_timeline_stretch = 0;
+
+  if (s_timeline_scroll_from == s_timeline_scroll_target) {
+    layer_mark_dirty(s_timeline_layer);
+    return;
+  }
+
+  s_timeline_scroll_timer = app_timer_register(
+      TIMELINE_SCROLL_FRAME_MS, timeline_scroll_tick, NULL);
+
+  if (s_timeline_scroll_timer == NULL) {
+    timeline_scroll_finish();
+  }
+}
+
+static void timeline_format_clock(time_t timestamp,
+                                  char *buffer, size_t size) {
+  snprintf(buffer, size, "--:--");
+  if (timestamp <= 0) {
+    return;
+  }
+
+  struct tm *clock_tm = localtime(&timestamp);
+  if (clock_tm == NULL) {
+    return;
+  }
+
+  int hour = clock_tm->tm_hour;
+  int minute = clock_tm->tm_min;
+
+  if (s_clock.use_12h) {
+    const char *period = hour < 12 ? "AM" : "PM";
+    hour %= 12;
+    if (hour == 0) {
+      hour = 12;
+    }
+
+    if (s_clock.show_ampm) {
+      snprintf(buffer, size, "%d:%02d %s", hour, minute, period);
+    } else {
+      snprintf(buffer, size, "%d:%02d", hour, minute);
+    }
+  } else if (s_clock.hide_hour_zero) {
+    snprintf(buffer, size, "%d:%02d", hour, minute);
+  } else {
+    snprintf(buffer, size, "%02d:%02d", hour, minute);
+  }
+}
+
+static void timeline_format_zone_range(int zone,
+                                       char *buffer, size_t size) {
+  if (zone < 0 || zone >= JOURNAL_ZONE_COUNT) {
+    snprintf(buffer, size, "--");
+  } else if (zone == 0) {
+    snprintf(buffer, size, "< %d bpm", s_session_zone_limits[0]);
+  } else if (zone == 4) {
+    snprintf(buffer, size, ">= %d bpm", s_session_zone_limits[3]);
+  } else {
+    snprintf(buffer, size, "%d - %d bpm",
+             s_session_zone_limits[zone - 1],
+             s_session_zone_limits[zone] - 1);
+  }
+}
+
 static void timeline_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   const int16_t bar_width = 30;
   const int16_t content_width = bounds.size.w - bar_width;
-  const int16_t block_height = 62;
-  const int16_t first_block_y = 36;
+  const int16_t first_block_y = TIMELINE_PAGE_TOP;
 
   static const GColor level_colors[5] = {
     COLOR_LEVEL_1,
@@ -1738,9 +2815,9 @@ static void timeline_layer_update_proc(Layer *layer, GContext *ctx) {
     COLOR_LEVEL_5
   };
 
-  const JournalSession *session = s_timeline_from_workout
-      ? &s_journal : &s_detail_session;
+  const JournalSession *session = &s_journal;
   static char start_text[24];
+  char end_text[24];
   const char *feeling_text = "";
   const char *achievement_text = "";
   GColor bar_color = GColorLightGray;
@@ -1760,18 +2837,14 @@ static void timeline_layer_update_proc(Layer *layer, GContext *ctx) {
     bar_color = level_colors[level - 1];
   }
 
-  if (session->start_time > 0) {
-    time_t start_time = (time_t) session->start_time;
-    struct tm *start_tm = localtime(&start_time);
+  timeline_format_clock(
+      (time_t) session->start_time, start_text, sizeof(start_text));
 
-    strftime(
-        start_text,
-        sizeof(start_text),
-        "%H:%M",
-        start_tm);
-  } else {
-    start_text[0] = '\0';
-  }
+  time_t end_time = s_session_end_time;
+
+  timeline_format_clock(
+      session->start_time > 0 ? end_time : 0,
+      end_text, sizeof(end_text));
 
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
@@ -1783,82 +2856,368 @@ static void timeline_layer_update_proc(Layer *layer, GContext *ctx) {
       0,
       GCornerNone);
 
+  uint8_t event_indices[JOURNAL_MAX_EVENTS];
+  int event_count = timeline_event_indices(session, event_indices);
+  bool has_achievement = achievement >= 0;
+  int start_block = 1 + (has_achievement ? 1 : 0);
+  int first_event_block = start_block + 1;
+  int block_count = first_event_block + event_count + 1;
+
+
+  for (int i = 0; i < block_count; i++) {
+    bool is_zone_block = i >= first_event_block &&
+        i < block_count - 1 &&
+        session->events[event_indices[i - first_event_block]].type
+            == JE_ZONE;
+    int item_height = timeline_block_height(
+        i, has_achievement, first_event_block,
+        event_count, event_indices);
+
+    int16_t y = first_block_y + timeline_block_offset(i)
+        - s_timeline_scroll_offset;
+
+    // Pendant le mouvement, conserve les blocs entrants et sortants.
+    if (y + item_height + 16 < 34 || y >= bounds.size.h + 16) {
+      continue;
+    }
+
+    char event_title[64];
+    char zone_range[32];
+    char event_time[64];
+    char zone_duration_text[64] = "";
+    char end_summary_text[64];
+    char end_clock_text[64];
+    char start_summary_text[64];
+    char start_clock_text[64];
+    const char *title = "";
+    const char *label = "";
+    const char *detail = "";
+
+    if (i == 0) {
+      title = feeling_text;
+      label = tr(STR_SUMMARY_EFFORT);
+    } else if (has_achievement && i == 1) {
+      title = achievement_text;
+      label = tr(STR_SUMMARY_ACHIEVEMENT);
+      detail = tr(STR_ACH_DESC_WELCOME_BACK + achievement);
+    } else if (i == start_block) {
+      title = tr(STR_TIMELINE_START);
+
+      if (s_session_start_bpm > 0) {
+        snprintf(
+            start_summary_text, sizeof(start_summary_text),
+            "00:00 min - %d bpm", s_session_start_bpm);
+      } else {
+        snprintf(
+            start_summary_text, sizeof(start_summary_text),
+            "00:00 min - -- bpm");
+      }
+      label = start_summary_text;
+
+      snprintf(
+          start_clock_text, sizeof(start_clock_text), "%s : %s",
+          tr(STR_TIMELINE_TIME), start_text);
+      detail = start_clock_text;
+    } else if (i == block_count - 1) {
+      title = tr(STR_TIMELINE_END);
+
+      snprintf(
+          end_summary_text, sizeof(end_summary_text),
+          "%u:%02u min - %u kcal",
+          (unsigned) (session->active_seconds / 60),
+          (unsigned) (session->active_seconds % 60),
+          (unsigned) session->calories);
+      label = end_summary_text;
+
+      snprintf(
+          end_clock_text, sizeof(end_clock_text), "%s : %s",
+          tr(STR_TIMELINE_TIME), end_text);
+      detail = end_clock_text;
+    } else {
+      int position = i - first_event_block;
+      int event_index = event_indices[position];
+      const JournalEvent *event = &session->events[event_index];
+
+      snprintf(event_time, sizeof(event_time), "%u:%02u min",
+               (unsigned) (event->seconds / 60),
+               (unsigned) (event->seconds % 60));
+      detail = event_time;
+
+      if (event->type == JE_ZONE) {
+        snprintf(event_title, sizeof(event_title), "%u:%02u min - %s",
+                 (unsigned) (event->seconds / 60),
+                 (unsigned) (event->seconds % 60),
+                 tr(STR_WORKOUT_ZONE_1 + event->value));
+        title = event_title;
+
+        timeline_format_zone_range(
+            event->value, zone_range, sizeof(zone_range));
+        label = zone_range;
+
+        uint16_t duration = s_journal_zone_duration[event_index];
+        if (duration > 0) {
+          snprintf(zone_duration_text, sizeof(zone_duration_text),
+                   "%s %u:%02u min", tr(STR_TIMELINE_DURATION),
+                   (unsigned) (duration / 60),
+                   (unsigned) (duration % 60));
+        } else {
+          snprintf(zone_duration_text, sizeof(zone_duration_text),
+                   "%s --:-- min", tr(STR_TIMELINE_DURATION));
+        }
+        detail = zone_duration_text;
+      } else if (event->type == JE_BORNE) {
+        int distance = event->value *
+            ((session->activity == ACTIVITY_RUN) ? 2 : 1);
+        snprintf(event_title, sizeof(event_title), "%u:%02u min - %d %s",
+                 (unsigned) (event->seconds / 60),
+                 (unsigned) (event->seconds % 60),
+                 distance, s_session_units_imperial ? "mi" : "km");
+        title = event_title;
+        label = tr(STR_LABEL_DISTANCE);
+        detail = "";
+      } else {
+        snprintf(event_title, sizeof(event_title), "%u:%02u min - %u kcal",
+                 (unsigned) (event->seconds / 60),
+                 (unsigned) (event->seconds % 60),
+                 (unsigned) event->value * 200u);
+        title = event_title;
+        label = tr(STR_SUMMARY_CALORIES);
+        detail = "";
+      }
+    }
+
+    bool is_endpoint = i == start_block || i == block_count - 1;
+    bool is_achievement = has_achievement && i == 1;
+    bool is_heading = i == 0 || is_achievement;
+    int heading_height = is_heading
+        ? timeline_heading_height(is_achievement) : 34;
+    GFont title_font = fonts_get_system_font(
+        is_achievement ? FONT_KEY_GOTHIC_24_BOLD
+                       : FONT_KEY_GOTHIC_28_BOLD);
+    GSize title_size = text_small_min_size(
+        title,
+        title_font,
+        GRect(0, 0, 1000, 40),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft);
+    int16_t title_y =
+        y + (is_heading ? 20 : 0) - s_timeline_stretch / 2;
+
+    if (!is_heading && title_size.w > content_width - 12) {
+      title_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+      title_size = text_small_min_size(
+          title,
+          title_font,
+          GRect(0, 0, 1000, 40),
+          GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft);
+    }
+
+    if (!is_heading && title_size.w > content_width - 12) {
+      title_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+      title_y += 4;
+    }
+
+    if (is_zone_block) {
+      const JournalEvent *zone_event =
+          &session->events[event_indices[i - first_event_block]];
+      const char *zone_text =
+          tr(STR_WORKOUT_ZONE_1 + zone_event->value);
+      char time_text[16];
+      snprintf(time_text, sizeof(time_text), "%u:%02u min",
+               (unsigned) (zone_event->seconds / 60),
+               (unsigned) (zone_event->seconds % 60));
+
+      title_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+      GSize time_size = text_small_min_size(
+          time_text, title_font, GRect(0, 0, 1000, 40),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      GSize zone_size = text_small_min_size(
+          zone_text, title_font, GRect(0, 0, 1000, 40),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+
+      if (time_size.w + 8 + zone_size.w + 12 > content_width - 12) {
+        title_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+        time_size = text_small_min_size(
+            time_text, title_font, GRect(0, 0, 1000, 40),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+        zone_size = text_small_min_size(
+            zone_text, title_font, GRect(0, 0, 1000, 40),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      }
+
+      int16_t pill_x = 6 + time_size.w + 8;
+      int16_t pill_width = zone_size.w + 12;
+      int16_t available_width = content_width - 6 - pill_x;
+      if (pill_width > available_width) {
+        pill_width = available_width;
+      }
+
+      GColor zone_color = level_colors[zone_event->value];
+      int16_t text_y = y - s_timeline_stretch / 2;
+      if (title_font == fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD)) {
+        text_y += 3;
+      }
+      title_y = text_y;
+
+      graphics_context_set_text_color(ctx, GColorBlack);
+      draw_text_small_min(
+          ctx, time_text, title_font,
+          GRect(6, text_y, time_size.w + 2, 30),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+
+      graphics_context_set_fill_color(ctx, zone_color);
+      graphics_fill_rect(
+          ctx, GRect(pill_x, y + 3 - s_timeline_stretch / 2,
+                     pill_width, 26),
+          8, GCornersAll);
+      graphics_context_set_text_color(
+          ctx, get_text_color_for_background(zone_color));
+      draw_text_small_min(
+          ctx, zone_text, title_font,
+          GRect(pill_x + 6, text_y, pill_width - 12, 30),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter);
+    } else if (is_achievement) {
+      GColor badge_color = ACCENT_YELLOW;
+      GColor badge_text_color =
+          get_text_color_for_background(badge_color);
+
+      graphics_context_set_fill_color(ctx, badge_color);
+      graphics_fill_rect(
+          ctx, GRect(6, title_y, content_width - 12, heading_height),
+          6, GCornersAll);
+
+      int16_t star_y = title_y + heading_height / 2;
+      timeline_draw_small_star(
+          ctx, GPoint(17, star_y), badge_text_color);
+      timeline_draw_small_star(
+          ctx, GPoint(content_width - 17, star_y), badge_text_color);
+
+      graphics_context_set_text_color(ctx, badge_text_color);
+      draw_text_small_min(
+          ctx, title, title_font,
+          GRect(28, title_y + 4, content_width - 56, heading_height - 8),
+          GTextOverflowModeWordWrap, GTextAlignmentCenter);
+    } else {
+      graphics_context_set_text_color(ctx, GColorBlack);
+      draw_text_small_min(
+          ctx,
+          title,
+          title_font,
+          GRect(6, title_y, content_width - 12, heading_height),
+          is_heading ? GTextOverflowModeWordWrap
+                     : GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentLeft);
+    }
+
+    graphics_context_set_text_color(ctx, GColorBlack);
+
+    draw_text_small_min(
+        ctx,
+        label,
+        fonts_get_system_font(
+            (is_zone_block || is_endpoint) ? FONT_KEY_GOTHIC_24_BOLD
+                                           : FONT_KEY_GOTHIC_18_BOLD),
+        GRect(6, y + (is_heading ? 0
+                                : (is_endpoint ? 24
+                                               : (is_zone_block ? 26 : 28))),
+              content_width - 12,
+              (is_zone_block || is_endpoint) ? 30 : 20),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft);
+
+    if (detail[0] != '\0') {
+      GFont detail_font = fonts_get_system_font(
+          is_achievement ? FONT_KEY_GOTHIC_24_BOLD
+                         : FONT_KEY_GOTHIC_24_BOLD);
+      if (!is_achievement) {
+        GSize detail_size = text_small_min_size(
+            detail, detail_font, GRect(0, 0, 1000, 40),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+        if (detail_size.w > content_width - 12) {
+          detail_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+        }
+      }
+
+      if (is_endpoint) {
+        draw_clock_small_suffix(
+            ctx, detail, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(6, y + 48 + s_timeline_stretch / 2,
+                  content_width - 12, 30),
+            GTextAlignmentLeft);
+      } else {
+        draw_text_small_min(
+            ctx,
+            detail,
+            detail_font,
+            GRect(6, y + (is_achievement ? heading_height + 20
+                                        : (is_endpoint ? 48
+                                                       : (is_zone_block ? 50 : 58)))
+                      + s_timeline_stretch / 2,
+                  content_width - 12,
+                  is_achievement
+                      ? item_height - heading_height - 28 : 30),
+            is_achievement ? GTextOverflowModeWordWrap
+                           : GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentLeft);
+      }
+    }
+
+    TimelineMarker marker;
+    if (i == 0) {
+      marker = TIMELINE_MARKER_FEELING;
+    } else if (has_achievement && i == 1) {
+      marker = TIMELINE_MARKER_ACHIEVEMENT;
+    } else if (i == start_block) {
+      marker = TIMELINE_MARKER_START;
+    } else if (i == block_count - 1) {
+      marker = TIMELINE_MARKER_END;
+    } else {
+      int position = i - first_event_block;
+      const JournalEvent *event =
+          &session->events[event_indices[position]];
+      marker = (event->type == JE_ZONE) ? TIMELINE_MARKER_ZONE
+          : (event->type == JE_BORNE) ? TIMELINE_MARKER_DISTANCE
+          : TIMELINE_MARKER_CALORIES;
+    }
+
+    int marker_center_y = title_y + 18;
+    if (title_font == fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD)) {
+      marker_center_y = title_y + 16;
+    } else if (title_font ==
+               fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD)) {
+      marker_center_y = title_y + 12;
+    }
+
+    if (is_achievement) {
+      marker_center_y = title_y + heading_height / 2;
+    }
+
+    timeline_draw_marker(
+        ctx,
+        GPoint(content_width + bar_width / 2, marker_center_y),
+        marker,
+        get_text_color_for_background(bar_color));
+  }
+
   graphics_context_set_fill_color(ctx, bar_color);
   graphics_fill_rect(
       ctx,
-      GRect(0, 0, content_width, 34),
+      GRect(0, 0, bounds.size.w, 34),
       0,
       GCornerNone);
 
   graphics_context_set_text_color(
       ctx, get_text_color_for_background(bar_color));
-  graphics_draw_text(
-      ctx,
-      tr(STR_TIMELINE_SUMMARY),
-      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-      GRect(0, 0, content_width, 28),
-      GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentCenter,
-      NULL);
-
-  const char *titles[3] = {
-    feeling_text,
-    achievement_text,
-    start_text
-  };
-  const char *labels[3] = {
-    tr(STR_SUMMARY_EFFORT),
-    tr(STR_SUMMARY_ACHIEVEMENT),
-    tr(STR_TIMELINE_START)
-  };
-  const char *details[3] = {
-    "",
-    "",
-    ""
-  };
-
-  for (int i = 0; i < 3; i++) {
-    int16_t y = first_block_y + (i - s_timeline_selection) * block_height;
-
-    if (y < 30 || y >= bounds.size.h) {
-      continue;
-    }
-
-    graphics_context_set_text_color(ctx, GColorBlack);
-    graphics_draw_text(
+  // Renforcement du titre sans changer sa taille ni sa position verticale.
+  for (int offset = 0; offset <= 1; offset++) {
+    draw_text_small_min(
         ctx,
-        titles[i],
+        tr(STR_TIMELINE_SUMMARY),
         fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-        GRect(6, y, content_width - 12, 28),
+        GRect(offset, 0, content_width, 28),
         GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
-
-    graphics_draw_text(
-        ctx,
-        labels[i],
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-        GRect(6, y + 27, content_width - 12, 20),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
-
-    if (details[i][0] != '\0') {
-      graphics_draw_text(
-          ctx,
-          details[i],
-          fonts_get_system_font(FONT_KEY_GOTHIC_14),
-          GRect(6, y + 46, content_width - 12, 16),
-          GTextOverflowModeTrailingEllipsis,
-          GTextAlignmentLeft,
-          NULL);
-    }
-
-    graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_circle(
-        ctx,
-        GPoint(content_width + bar_width / 2, y + 22),
-        7);
+        GTextAlignmentCenter);
   }
 }
 
@@ -1866,30 +3225,32 @@ static void timeline_up_click_handler(
     ClickRecognizerRef recognizer, void *context) {
   if (s_timeline_selection > 0) {
     s_timeline_selection--;
-    layer_mark_dirty(s_timeline_layer);
+    timeline_scroll_to_selection();
   }
 }
 
 static void timeline_down_click_handler(
     ClickRecognizerRef recognizer, void *context) {
-  if (s_timeline_selection < 2) {
+  if (s_timeline_selection < s_timeline_page_count - 1) {
     s_timeline_selection++;
-    layer_mark_dirty(s_timeline_layer);
+    timeline_scroll_to_selection();
   }
 }
 
 static void timeline_select_click_handler(
     ClickRecognizerRef recognizer, void *context) {
-  if (s_timeline_from_workout) {
-    s_summary_from_timeline = true;
-    window_stack_push(s_summary_window, true);
-    return;
-  }
+  timeline_scroll_finish();
+  s_summary_from_timeline = true;
+  window_stack_push(s_summary_window, true);
+}
 
-  window_stack_pop(true);
+static void timeline_back_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  // La sortie du parcours passe uniquement par le resume.
 }
 
 static void timeline_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_BACK, timeline_back_click_handler);
   window_single_click_subscribe(BUTTON_ID_UP, timeline_up_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, timeline_down_click_handler);
   window_single_click_subscribe(
@@ -1902,13 +3263,18 @@ static void timeline_window_load(Window *window) {
 
   window_set_background_color(window, GColorWhite);
   s_timeline_selection = 0;
+  s_timeline_page_count = 0;
+  timeline_scroll_finish();
 
   s_timeline_layer = layer_create(bounds);
+  timeline_build_pages();
+  timeline_scroll_finish();
   layer_set_update_proc(s_timeline_layer, timeline_layer_update_proc);
   layer_add_child(window_layer, s_timeline_layer);
 }
 
 static void timeline_window_unload(Window *window) {
+  timeline_scroll_finish();
   layer_destroy(s_timeline_layer);
   s_timeline_layer = NULL;
 }
@@ -1923,20 +3289,25 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   int16_t y = scroll_frame.origin.y + 44;
   int16_t step = 72;
   char text[32];
-  char date_text[24];
+  char date_text[32];
   time_t start_time = (time_t) d->start_time;
   struct tm *start_tm = localtime(&start_time);
 
-  if (start_tm != NULL) {
-    snprintf(
-        date_text, sizeof(date_text), "%02d/%02d · %02d:%02d",
-        start_tm->tm_mday,
-        start_tm->tm_mon + 1,
-        start_tm->tm_hour,
-        start_tm->tm_min);
-  } else {
-    snprintf(date_text, sizeof(date_text), "--/-- --:--");
+  char day_text[12];
+  char session_clock_text[16];
+
+  if (start_tm == NULL ||
+      strftime(day_text, sizeof(day_text), "%d/%m", start_tm) == 0) {
+    snprintf(day_text, sizeof(day_text), "--/--");
   }
+
+  timeline_format_clock(
+      start_time, session_clock_text, sizeof(session_clock_text));
+  snprintf(date_text, sizeof(date_text), "%s · %s",
+           day_text, session_clock_text);
+
+  GFont date_time_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+
 
 
 
@@ -1954,12 +3325,12 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
       NULL);
 
   snprintf(
-      text, sizeof(text), "%02d:%02d",
+      text, sizeof(text), "%02d:%02d min",
       (int) (d->active_seconds / 60),
       (int) (d->active_seconds % 60));
   draw_detail_line(
       ctx, y, date_text, "", tr(STR_LABEL_DATE),
-      fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
+      date_time_font);
   y += step;
 
   draw_detail_line(
@@ -1967,7 +3338,7 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   y += step;
 
   snprintf(
-      text, sizeof(text), "%02d:%02d",
+      text, sizeof(text), "%02d:%02d min",
       (int) (d->total_seconds / 60),
       (int) (d->total_seconds % 60));
   draw_detail_line(
@@ -2032,7 +3403,7 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
   for (int i = 0; i < JOURNAL_ZONE_COUNT; i++) {
     if (d->zone_seconds[i] > 0) {
       snprintf(
-          text, sizeof(text), "%d:%02d",
+          text, sizeof(text), "%d:%02d min",
           (int) (d->zone_seconds[i] / 60),
           (int) (d->zone_seconds[i] % 60));
       draw_detail_line(
@@ -2057,6 +3428,7 @@ static void detail_layer_update_proc(Layer *layer, GContext *ctx) {
 
 static void detail_back_click_handler(
     ClickRecognizerRef recognizer, void *context) {
+  detail_cancel_scroll_animation();
   window_stack_pop(true);
 }
 
@@ -2082,6 +3454,7 @@ static void detail_window_load(Window *window) {
 }
 
 static void detail_window_unload(Window *window) {
+  detail_cancel_scroll_animation();
   layer_destroy(s_detail_layer);
   s_detail_layer = NULL;
 }
@@ -2143,9 +3516,31 @@ static void countdown_window_unload(Window *window) {
   s_countdown_activity_layer = NULL;
 }
 
+static void workout_resume_session(void) {
+  if (!s_is_paused) {
+    return;
+  }
+
+  HealthValue total_today = health_service_sum_today(HealthMetricStepCount);
+  step_counter_rebase(&s_step_counter, (int) total_today);
+
+  // Nouvelle fenetre d'allure recente, sans effacer les courbes.
+  s_graph_distance_count = 0;
+  s_is_paused = false;
+}
+
 static void workout_up_click_handler(ClickRecognizerRef recognizer,
                                      void *context) {
-  s_is_paused = !s_is_paused;
+  if (!s_is_paused) {
+    refresh_steps_now();
+    s_is_paused = true;
+
+    // Une pause coupe la sequence, sans effacer le maximum.
+    s_journal_redline_current = 0;
+    journal_zone_pass_reset();
+  } else {
+    workout_resume_session();
+  }
 
   layer_mark_dirty(s_workout_layer);
 }
@@ -2153,6 +3548,11 @@ static void workout_up_click_handler(ClickRecognizerRef recognizer,
 static void workout_select_click_handler(ClickRecognizerRef recognizer,
                                          void *context) {
   if (s_is_paused) {
+    // Heure provisoire de fin, confirmee par le choix du ressenti.
+    // Chaque nouvel appui sur Stop remplace la precedente.
+    s_session_end_time = time(NULL);
+    s_session_total_at_stop =
+        (uint32_t) s_elapsed_seconds + (uint32_t) s_paused_seconds;
     window_stack_push(s_stop_confirm_window, true);
   }
 }
@@ -2163,7 +3563,9 @@ static bool is_metric_available(WorkoutMetric metric) {
   }
 
   // Entrainement libre : seulement la duree et la frequence cardiaque.
-  return metric == METRIC_DURATION || metric == METRIC_HEART_RATE;
+  return metric == METRIC_DURATION ||
+         metric == METRIC_HEART_RATE ||
+         metric == METRIC_HEART_RATE_GRAPH;
 }
 
 static WorkoutMetric get_next_metric(WorkoutMetric current) {
@@ -2218,6 +3620,7 @@ static void workout_window_load(Window *window) {
   s_stay_awake = false;
   light_enable(false);
   s_current_bpm = 0;
+  s_session_start_bpm = 0;
   s_heart_rate_available = false;
   s_heart_rate_zone = -1;
   s_seconds_since_last_bpm_read = 0;
@@ -2227,6 +3630,7 @@ static void workout_window_load(Window *window) {
 
   HealthValue starting_steps = health_service_sum_today(HealthMetricStepCount);
   step_counter_start(&s_step_counter, (int) starting_steps);
+  workout_graph_reset();
 
   s_bpm_sum = 0;
   s_bpm_sample_count = 0;
@@ -2412,7 +3816,8 @@ static void stop_confirm_down_click_handler(ClickRecognizerRef recognizer,
   layer_mark_dirty(s_stop_confirm_layer);
 }
 
-static void journal_session_save(void) {
+// Prepare la seance et les succes en RAM, sans ecriture persistante.
+static void journal_session_prepare(void) {
   JournalStats stats;
   JournalDays days;
   int avg_bpm = 0;
@@ -2443,8 +3848,7 @@ static void journal_session_save(void) {
   }
 
   s_journal.active_seconds = (uint16_t) s_elapsed_seconds;
-  s_journal.total_seconds =
-      (uint16_t) (s_elapsed_seconds + s_paused_seconds);
+  s_journal.total_seconds = (uint16_t) s_session_total_at_stop;
   s_journal.steps = (uint32_t) s_current_steps;
   s_journal.distance_m = (uint32_t) get_distance_meters();
   s_journal.calories = (uint16_t) get_session_calories();
@@ -2457,31 +3861,41 @@ static void journal_session_save(void) {
   s_journal.achievements = achievements_compute(
       &s_journal, &stats, &days, &s_goals,
       s_session_start_hour, s_session_start_day);
+  s_session_pending_save =
+      s_elapsed_seconds >= MINIMUM_SESSION_SECONDS;
 
-  journal_save_all(&s_journal, s_session_start_day);
 }
 
 static void stop_confirm_select_click_handler(ClickRecognizerRef recognizer,
                                               void *context) {
   if (s_effort_choice == 0) {
-    s_is_paused = false;
+    workout_resume_session();
     layer_mark_dirty(s_workout_layer);
     window_stack_pop(true);
     return;
   }
 
   s_effort_rating = s_effort_choice;
-  journal_session_save();
   tick_timer_service_unsubscribe();
-  s_timeline_from_workout = true;
+  s_summary_from_timeline = false;
+
+  if (s_elapsed_seconds >= MINIMUM_SESSION_SECONDS) {
+    journal_session_prepare();
+  }
+
   window_stack_pop(true);
   window_stack_pop(true);
-  window_stack_push(s_timeline_window, true);
+
+  if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS) {
+    window_stack_push(s_summary_window, true);
+  } else {
+    window_stack_push(s_timeline_window, true);
+  }
 }
 
 static void stop_confirm_back_click_handler(ClickRecognizerRef recognizer,
                                             void *context) {
-  s_is_paused = false;
+  workout_resume_session();
   layer_mark_dirty(s_workout_layer);
   window_stack_pop(true);
 }
@@ -2538,37 +3952,36 @@ static void draw_summary_line(GContext *ctx, int16_t y, const char *value,
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft);
 
-  graphics_context_set_text_color(ctx, s_summary_value_color);
-  graphics_draw_text(
-      ctx,
-      value,
-      value_font,
-      GRect(6, y, 188, 44),
-      GTextOverflowModeTrailingEllipsis,
-      GTextAlignmentLeft,
-      NULL);
-
-  // L'unite garde sa taille d'origine (Gothic 28 gras), a droite de la valeur.
-  if (unit[0] != '\0') {
-    graphics_draw_text(
-        ctx,
-        unit,
-        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-        GRect(6 + value_size.w + 6, y + SUMMARY_UNIT_Y_OFFSET, 110, 34),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentLeft,
-        NULL);
-  }
-
   graphics_context_set_text_color(ctx, s_summary_label_color);
   graphics_draw_text(
       ctx,
       label,
       fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(6, y + 42, 188, 22),
+      GRect(6, y, 188, 22),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft,
       NULL);
+
+  graphics_context_set_text_color(ctx, s_summary_value_color);
+  graphics_draw_text(
+      ctx,
+      value,
+      value_font,
+      GRect(6, y + 22, 188, 44),
+      GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft,
+      NULL);
+
+  if (unit[0] != '\0') {
+    graphics_draw_text(
+        ctx,
+        unit,
+        fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+        GRect(6 + value_size.w + 6, y + 22 + SUMMARY_UNIT_Y_OFFSET, 110, 34),
+        GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft,
+        NULL);
+  }
 }
 
 // Score d'effort de 10 a 50 : FC moyenne (zone x 10) et effort ressenti.
@@ -2582,7 +3995,7 @@ static void draw_summary_intensity(GContext *ctx, int16_t y, int level) {
   const int16_t segment_width = 30;
   const int16_t segment_height = 20;
   const int16_t segment_gap = 4;
-  const int16_t segment_y = y + 8;
+  const int16_t segment_y = y + 26;
 
   for (int i = 0; i < 5; i++) {
     int16_t x = 6 + i * (segment_width + segment_gap);
@@ -2608,7 +4021,7 @@ static void draw_summary_intensity(GContext *ctx, int16_t y, int level) {
       ctx,
       tr(STR_SUMMARY_INTENSITY),
       fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-      GRect(6, y + 42, 188, 22),
+      GRect(6, y, 188, 22),
       GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft,
       NULL);
@@ -2927,6 +4340,11 @@ static void summary_layer_update_proc(Layer *layer, GContext *ctx) {
 
 static void summary_up_click_handler(ClickRecognizerRef recognizer,
                                      void *context) {
+  if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS) {
+    session_return_to_menu();
+    return;
+  }
+
   s_summary_scroll_offset -= SUMMARY_SCROLL_STEP;
 
   if (s_summary_scroll_offset < 0) {
@@ -2938,6 +4356,11 @@ static void summary_up_click_handler(ClickRecognizerRef recognizer,
 
 static void summary_down_click_handler(ClickRecognizerRef recognizer,
                                        void *context) {
+  if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS) {
+    session_return_to_menu();
+    return;
+  }
+
   GRect bounds = layer_get_bounds(s_summary_layer);
   int max_offset = s_summary_content_height - bounds.size.h;
 
@@ -2954,19 +4377,181 @@ static void summary_down_click_handler(ClickRecognizerRef recognizer,
   layer_mark_dirty(s_summary_layer);
 }
 
-static void summary_select_click_handler(ClickRecognizerRef recognizer,
-                                         void *context) {
-  // Le bouton central clot le parcours et revient toujours au menu.
+static void session_return_to_menu(void) {
+  s_session_pending_save = false;
   s_summary_from_timeline = false;
-  s_timeline_from_workout = false;
 
-  while (window_stack_get_top_window() != s_menu_window) {
+  while (window_stack_get_top_window() != NULL &&
+         window_stack_get_top_window() != s_menu_window) {
     window_stack_pop(true);
   }
 }
 
+static void save_layer_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  const int16_t bar_width = SIDE_BAR_WIDTH;
+  const int16_t content_width = bounds.size.w - bar_width;
+  const int16_t center_x = content_width + bar_width / 2;
+  GFont title_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GFont message_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(
+      ctx, GRect(content_width, 0, bar_width, bounds.size.h),
+      0, GCornerNone);
+
+  // Disquette blanche, centree face au bouton Haut.
+  int16_t x = center_x - 11;
+  int16_t y = EFFORT_ICON_UP_CENTER_Y - 11;
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, GRect(x, y, 22, 22), 2, GCornersAll);
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, GRect(x + 12, y + 2, 6, 6), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(x + 4, y + 13, 14, 7), 0, GCornerNone);
+
+  // Poubelle blanche, centree face au bouton Bas.
+  y = EFFORT_ICON_DOWN_CENTER_Y - 11;
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, GRect(x + 8, y, 6, 3), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(x + 2, y + 4, 18, 3), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(x + 4, y + 9, 14, 14), 2, GCornersAll);
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, GRect(x + 7, y + 11, 2, 9), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(x + 13, y + 11, 2, 9), 0, GCornerNone);
+
+  const char *warning = s_save_error ? tr(STR_SAVE_ERROR)
+      : (s_save_full ? tr(STR_SAVE_REPLACE_WARNING) : "");
+  const char *title = tr(STR_SAVE_QUESTION);
+  const int16_t text_width = content_width - 16;
+  const int16_t gap = warning[0] != '\0' ? 12 : 0;
+
+  GSize title_size = graphics_text_layout_get_content_size(
+      title, title_font, GRect(0, 0, text_width, 1000),
+      GTextOverflowModeWordWrap, GTextAlignmentCenter);
+
+  GSize message_size = GSize(0, 0);
+  if (warning[0] != '\0') {
+    message_size = graphics_text_layout_get_content_size(
+        warning, message_font, GRect(0, 0, text_width, 1000),
+        GTextOverflowModeWordWrap, GTextAlignmentCenter);
+  }
+
+  int16_t title_height = title_size.h + 4;
+  int16_t message_height =
+      warning[0] != '\0' ? message_size.h + 4 : 0;
+
+  const int16_t title_y = warning[0] != '\0'
+      ? 16
+      : (bounds.size.h - title_height) / 2;
+  const int16_t message_top = title_y + title_height + gap;
+  const int16_t message_bottom = bounds.size.h - 16;
+  const int16_t available_height = message_bottom - message_top;
+
+  if (warning[0] != '\0' && message_height > available_height) {
+    message_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    message_size = graphics_text_layout_get_content_size(
+        warning, message_font, GRect(0, 0, text_width, 1000),
+        GTextOverflowModeWordWrap, GTextAlignmentCenter);
+    message_height = message_size.h + 4;
+  }
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(
+      ctx, title, title_font,
+      GRect(8, title_y, text_width, title_height),
+      GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+
+  if (warning[0] != '\0') {
+    // Centre le message entre les icones Haut et Bas.
+    const int16_t icons_center_y =
+        (EFFORT_ICON_UP_CENTER_Y + EFFORT_ICON_DOWN_CENTER_Y) / 2;
+    int16_t message_y = icons_center_y - message_height / 2;
+    if (message_y < message_top) {
+      message_y = message_top;
+    }
+
+    graphics_draw_text(
+        ctx, warning, message_font,
+        GRect(8, message_y, text_width, message_bottom - message_y),
+        GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+  }
+
+}
+
+static void save_up_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  if (!s_session_pending_save ||
+      s_elapsed_seconds < MINIMUM_SESSION_SECONDS ||
+      s_save_error) {
+    return;
+  }
+
+  if (journal_save_all(&s_journal, s_session_start_day)) {
+    session_return_to_menu();
+  } else {
+    // Pas de nouvelle tentative apres une eventuelle ecriture partielle.
+    s_save_error = true;
+    layer_mark_dirty(s_save_layer);
+  }
+}
+
+static void save_down_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+  // Abandonne la seance courante, sans supprimer une ancienne seance.
+  session_return_to_menu();
+}
+
+static void save_noop_click_handler(
+    ClickRecognizerRef recognizer, void *context) {
+}
+
+static void save_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_UP, save_up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, save_down_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, save_noop_click_handler);
+  window_single_click_subscribe(BUTTON_ID_BACK, save_noop_click_handler);
+}
+
+static void save_window_load(Window *window) {
+  JournalIndex index;
+  journal_load_index(&index);
+  s_save_full = journal_index_is_full(&index);
+  s_save_error = false;
+
+  Layer *root = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(root);
+  window_set_background_color(window, GColorWhite);
+  s_save_layer = layer_create(bounds);
+  layer_set_update_proc(s_save_layer, save_layer_update_proc);
+  layer_add_child(root, s_save_layer);
+}
+
+static void save_window_unload(Window *window) {
+  layer_destroy(s_save_layer);
+  s_save_layer = NULL;
+}
+
+static void summary_select_click_handler(ClickRecognizerRef recognizer,
+                                         void *context) {
+  if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS ||
+      !s_session_pending_save) {
+    session_return_to_menu();
+    return;
+  }
+
+  window_stack_push(s_save_window, true);
+}
+
 static void summary_back_click_handler(ClickRecognizerRef recognizer,
                                        void *context) {
+  if (s_elapsed_seconds < MINIMUM_SESSION_SECONDS) {
+    session_return_to_menu();
+    return;
+  }
+
   if (s_summary_from_timeline) {
     s_summary_from_timeline = false;
     window_stack_pop(true);
@@ -3058,7 +4643,16 @@ static void clock_save(void) {
 
 static void alerts_load(void) {
   if (persist_exists(ALERT_PERSIST_KEY)) {
-    persist_read_data(ALERT_PERSIST_KEY, &s_alerts, sizeof(s_alerts));
+    int stored_size = persist_get_size(ALERT_PERSIST_KEY);
+    // Ancien format : sept int16_t ; nouveau : huit.
+    if (stored_size == 7 * (int) sizeof(int16_t) ||
+        stored_size == (int) sizeof(s_alerts)) {
+      persist_read_data(ALERT_PERSIST_KEY, &s_alerts, sizeof(s_alerts));
+    }
+  }
+
+  if (s_alerts.vibration_level < 0 || s_alerts.vibration_level > 2) {
+    s_alerts.vibration_level = 1;
   }
 
   s_alerts.vibrate_km = s_alerts.vibrate_km ? 1 : 0;
@@ -3252,6 +4846,12 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     s_alerts.sound_interval = (tuple_to_int(tuple) == 1) ? 1 : 0;
   }
 
+  tuple = dict_find(iter, MESSAGE_KEY_VibrationLevel);
+  if (tuple) {
+    int level = tuple_to_int(tuple);
+    s_alerts.vibration_level = (level >= 0 && level <= 2) ? level : 1;
+  }
+
   tuple = dict_find(iter, MESSAGE_KEY_GoalSessionSteps);
   if (tuple) {
     s_goals.session_goal = (uint32_t) tuple_to_int(tuple);
@@ -3263,7 +4863,8 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     int km = tuple_to_int(tuple);
 
     if (s_goals.goal_is_steps == 0) {
-      s_goals.session_goal = (km > 0) ? (uint32_t) km * 1000 : 0;
+      s_goals.session_goal =
+          (km > 0 && km <= 10000) ? (uint32_t) km * 1000 : 0;
     }
   }
 
@@ -3272,7 +4873,7 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
     int km = tuple_to_int(tuple);
 
     s_goals.week_distance_m =
-        (km > 0) ? (uint32_t) km * 1000 : 50000;
+        (km > 0 && km <= 10000) ? (uint32_t) km * 1000 : 50000;
   }
 
   tuple = dict_find(iter, MESSAGE_KEY_GoalWeekSessions);
@@ -3293,7 +4894,7 @@ static void profile_inbox_received_handler(DictionaryIterator *iter,
 static void init(void) {
   profile_load();
   app_message_register_inbox_received(profile_inbox_received_handler);
-  app_message_open(384, 32);
+  app_message_open(512, 32);
 
   s_roboto_condensed_extrabold_font = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_EXTRABOLD_56));
@@ -3395,6 +4996,16 @@ static void init(void) {
           .unload = summary_window_unload,
       });
 
+  s_save_window = window_create();
+  window_set_click_config_provider(
+      s_save_window, save_click_config_provider);
+  window_set_window_handlers(
+      s_save_window,
+      (WindowHandlers) {
+          .load = save_window_load,
+          .unload = save_window_unload,
+      });
+
   window_stack_push(s_menu_window, true);
 }
 
@@ -3406,6 +5017,7 @@ static void deinit(void) {
 
   tick_timer_service_unsubscribe();
 
+  window_destroy(s_save_window);
   window_destroy(s_summary_window);
   window_destroy(s_timeline_window);
   window_destroy(s_detail_window);
