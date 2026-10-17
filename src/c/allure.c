@@ -1966,7 +1966,7 @@ static void journal_layer_update_proc(Layer *layer, GContext *ctx) {
 
   if (s_journal_count == 0) {
     draw_text_small_min(
-        ctx, tr(STR_TOO_SHORT), date_font,
+        ctx, tr(STR_NO_SESSIONS), date_font,
         GRect(6, 100, bounds.size.w - 12, 40),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter);
     return;

@@ -159,22 +159,6 @@ module.exports = function () {
     return Math.round(Number(miles) * KM_PER_MILE);
   }
 
-  // La montre attend des kilometres entiers, meme si l'utilisateur saisit
-  // des miles. La conversion est appliquee juste avant l'envoi.
-  clayConfig.on(clayConfig.EVENTS.BEFORE_SEND, function (e) {
-    if (!isImperial()) {
-      return;
-    }
-
-    var sessionMiles = Number(item('GoalSessionDistanceKm').get());
-    var weekMiles = Number(item('GoalWeekDistanceKm').get());
-
-    e.response['GoalSessionDistanceKm'] =
-      Math.round(sessionMiles * KM_PER_MILE);
-    e.response['GoalWeekDistanceKm'] =
-      Math.round(weekMiles * KM_PER_MILE);
-  });
-
   clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function () {
     var lastImperial = isImperial();
     refresh();
